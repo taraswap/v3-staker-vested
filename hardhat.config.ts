@@ -41,25 +41,26 @@ const config: HardhatUserConfig = {
       allowUnlimitedContractSize: false,
     },
     polygon: {
-      url: "https://rpc.ankr.com/polygon",
-      chainId: 137
+      url: 'https://rpc.ankr.com/polygon',
+      chainId: 137,
     },
-    mainnet: {
-      url: "https://rpc.ankr.com/eth",
-      chainId: 1
+    taraxa: {
+      url: 'https://rpc.mainnet.taraxa.io',
+      chainId: 841,
+      accounts: [process.env.PRIVATE_KEY || ''],
     },
     optimism: {
-      url: "https://rpc.ankr.com/optimism",
-      chainId: 10
+      url: 'https://rpc.ankr.com/optimism',
+      chainId: 10,
     },
     arbitrum: {
-      url: "https://rpc.ankr.com/arbitrum",
-      chainId: 42161
+      url: 'https://rpc.ankr.com/arbitrum',
+      chainId: 42161,
     },
     evmos: {
-      url: "https://evmos-evm.publicnode.com",
-      chainId: 9001
-    }
+      url: 'https://evmos-evm.publicnode.com',
+      chainId: 9001,
+    },
   },
   solidity: {
     compilers: [DEFAULT_COMPILER_SETTINGS],
