@@ -6,6 +6,8 @@ import 'hardhat-contract-sizer'
 import { HardhatUserConfig } from 'hardhat/config'
 import { SolcUserConfig } from 'hardhat/types'
 import 'solidity-coverage'
+import * as dotenv from 'dotenv'
+dotenv.config()
 
 const DEFAULT_COMPILER_SETTINGS: SolcUserConfig = {
   version: '0.7.6',
@@ -14,9 +16,14 @@ const DEFAULT_COMPILER_SETTINGS: SolcUserConfig = {
       enabled: true,
       runs: 1_000_000,
     },
-    metadata: {
-      bytecodeHash: 'none',
+    outputSelection: {
+      '*': {
+        '*': ['metadata', 'evm.bytecode', 'evm.deployedBytecode', 'abi'],
+      },
     },
+    // metadata: {
+    //   bytecodeHash: 'none',
+    // },
   },
 }
 
@@ -69,6 +76,21 @@ const config: HardhatUserConfig = {
     alphaSort: false,
     disambiguatePaths: true,
     runOnCompile: false,
+  },
+  etherscan: {
+    apiKey: {
+      taraxa: 'empty',
+    },
+    customChains: [
+      {
+        network: 'taraxa',
+        chainId: 841,
+        urls: {
+          apiURL: 'https://tara.to/api',
+          browserURL: 'https://tara.to',
+        },
+      },
+    ],
   },
 }
 
