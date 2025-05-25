@@ -13,11 +13,14 @@ export class RewardClaim {
   @Column()
   userAddress: string;
 
-  @Column()
-  rewardToken: string;
-
   @Column('bigint')
   amount: string;
+
+  @Column()
+  incentiveId: string;
+
+  @Column('bigint')
+  tokenId: string;
 
   @CreateDateColumn()
   claimedAt: Date;

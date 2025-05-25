@@ -2,10 +2,8 @@ import {
   Entity,
   Column,
   PrimaryGeneratedColumn,
-  OneToMany,
   CreateDateColumn,
 } from 'typeorm';
-import { Stake } from './stake.entity';
 
 @Entity('positions')
 export class Position {
@@ -27,8 +25,8 @@ export class Position {
   @Column('bigint')
   liquidity: string;
 
-  @OneToMany(() => Stake, (stake) => stake.position)
-  stakes: Stake[];
+  @Column('bigint', { default: '0' })
+  lastRewardCalculationTime: string;
 
   @CreateDateColumn()
   createdAt: Date;
