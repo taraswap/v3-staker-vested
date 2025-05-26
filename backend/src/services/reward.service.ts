@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { BigNumber } from 'ethers';
 import { Position } from '../entities/position.entity';
 import { Incentive } from '../entities/incentive.entity';
 import { Stake } from '../entities/stake.entity';
@@ -46,18 +45,16 @@ export class RewardService {
     const currentTime = Math.floor(Date.now() / 1000);
 
     const result = this.rewardCalculator.computeRewardAmount({
-      totalRewardUnclaimed: BigNumber.from(incentive.totalRewardUnclaimed),
-      totalSecondsClaimedX128: BigNumber.from(
-        incentive.totalSecondsClaimedX128,
-      ),
+      totalRewardUnclaimed: BigInt(incentive.totalRewardUnclaimed),
+      totalSecondsClaimedX128: BigInt(incentive.totalSecondsClaimedX128.toString()),
       startTime: parseInt(incentive.startTime),
       endTime: parseInt(incentive.endTime),
       vestingPeriod: parseInt(incentive.vestingPeriod),
-      liquidity: BigNumber.from(stake.liquidity),
-      secondsPerLiquidityInsideInitialX128: BigNumber.from(
+      liquidity: BigInt(stake.liquidity),
+      secondsPerLiquidityInsideInitialX128: BigInt(
         stake.secondsPerLiquidityInsideInitialX128,
       ),
-      secondsPerLiquidityInsideX128: BigNumber.from(
+      secondsPerLiquidityInsideX128: BigInt(
         stake.secondsPerLiquidityInsideInitialX128,
       ), // This should be updated with current value
       secondsInsideInitial: stake.secondsInsideInitial,
@@ -77,7 +74,7 @@ export class RewardService {
       relations: ['stakes', 'stakes.incentive'],
     });
 
-    const rewards = new Map<string, BigNumber>();
+    const rewards: Record<string, string> = {};
 
     for (const position of positions) {
       for (const stake of position.stakes) {
@@ -87,16 +84,12 @@ export class RewardService {
         );
         const rewardToken = stake.incentive.rewardToken;
 
-        const currentReward = rewards.get(rewardToken) || BigNumber.from(0);
-        rewards.set(rewardToken, currentReward.add(result.reward));
+        const currentReward = BigInt(rewards[rewardToken] || '0');
+        const newReward = currentReward + BigInt(result.reward);
+        rewards[rewardToken] = newReward.toString();
       }
     }
 
-    return Object.fromEntries(
-      Array.from(rewards.entries()).map(([token, amount]) => [
-        token,
-        amount.toString(),
-      ]),
-    );
+    return rewards;
   }
 }

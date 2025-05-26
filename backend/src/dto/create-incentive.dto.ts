@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsPositive } from 'class-validator';
+import { IsString, IsNumber, IsPositive, IsNotEmpty } from 'class-validator';
 
 export class CreateIncentiveDto {
   @IsString()
@@ -19,4 +19,8 @@ export class CreateIncentiveDto {
   @IsNumber()
   @IsPositive()
   totalRewardUnclaimed: number;
+
+  @IsString()
+  @IsNotEmpty()
+  rewardToken: string;
 }

@@ -47,7 +47,8 @@ export class IncentiveService {
     incentive.vestingPeriod = createIncentiveDto.vestingPeriod.toString();
     incentive.totalRewardUnclaimed =
       createIncentiveDto.totalRewardUnclaimed.toString();
-    incentive.totalSecondsClaimedX128 = '0';
+    incentive.totalSecondsClaimedX128 = BigInt(0);
+    incentive.totalRewardClaimed = BigInt(0);
 
     // Generate a unique incentive ID using keccak256 hash
     const incentiveId = ethers.keccak256(

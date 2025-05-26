@@ -3,12 +3,17 @@ import {
   Column,
   PrimaryGeneratedColumn,
   CreateDateColumn,
+  OneToMany,
 } from 'typeorm';
+import { Stake } from './stake.entity';
 
 @Entity('positions')
 export class Position {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @OneToMany(() => Stake, (stake) => stake.position)
+  stakes: Stake[];
 
   @Column('bigint')
   tokenId: string;

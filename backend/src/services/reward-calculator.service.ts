@@ -1,46 +1,34 @@
 import { Injectable } from '@nestjs/common';
-import { BigNumber } from 'ethers';
 
 @Injectable()
 export class RewardCalculator {
   computeRewardAmount(params: {
-    totalRewardUnclaimed: BigNumber;
-    totalSecondsClaimedX128: BigNumber;
+    totalRewardUnclaimed: bigint;
+    totalSecondsClaimedX128: bigint;
     startTime: number;
     endTime: number;
     vestingPeriod: number;
-    liquidity: BigNumber;
-    secondsPerLiquidityInsideInitialX128: BigNumber;
-    secondsPerLiquidityInsideX128: BigNumber;
+    liquidity: bigint;
+    secondsPerLiquidityInsideInitialX128: bigint;
+    secondsPerLiquidityInsideX128: bigint;
     secondsInsideInitial: number;
     secondsInside: number;
     currentTime: number;
   }) {
-    const secondsInsideX128 = params.secondsPerLiquidityInsideX128
-      .sub(params.secondsPerLiquidityInsideInitialX128)
-      .mul(params.liquidity);
+    const secondsInsideX128 = (params.secondsPerLiquidityInsideX128 - params.secondsPerLiquidityInsideInitialX128) * params.liquidity;
 
-    const totalSecondsUnclaimedX128 = BigNumber.from(
-      Math.max(params.endTime, params.currentTime),
-    )
-      .sub(params.startTime)
-      .shl(128)
-      .sub(params.totalSecondsClaimedX128);
+    const totalSecondsUnclaimedX128 = BigInt(Math.max(params.endTime, params.currentTime))
+      - BigInt(params.startTime)
+      << BigInt(128)
+      - params.totalSecondsClaimedX128;
 
-    const maxReward = params.totalRewardUnclaimed
-      .mul(secondsInsideX128)
-      .div(totalSecondsUnclaimedX128);
+    const maxReward = (params.totalRewardUnclaimed * secondsInsideX128) / totalSecondsUnclaimedX128;
 
-    let reward: BigNumber;
-    if (
-      params.vestingPeriod <=
-      params.secondsInside - params.secondsInsideInitial
-    ) {
+    let reward: bigint;
+    if (params.vestingPeriod <= params.secondsInside - params.secondsInsideInitial) {
       reward = maxReward;
     } else {
-      reward = maxReward
-        .mul(params.secondsInside - params.secondsInsideInitial)
-        .div(params.vestingPeriod);
+      reward = (maxReward * BigInt(params.secondsInside - params.secondsInsideInitial)) / BigInt(params.vestingPeriod);
     }
 
     return {
