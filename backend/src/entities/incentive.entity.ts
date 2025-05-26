@@ -40,8 +40,8 @@ export class Incentive {
   rewardToken: string;
 
   @Column('bigint')
-  totalSecondsClaimedX128: BigInt;
+  totalSecondsClaimedX128: string;
 
   @Column('bigint')
-  totalRewardClaimed: BigInt;
+  totalRewardClaimed: string;
 }

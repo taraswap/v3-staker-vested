@@ -39,16 +39,20 @@ export class IncentiveService {
   async createIncentive(
     createIncentiveDto: CreateIncentiveDto,
   ): Promise<Incentive> {
+    const TSWAP_ADDRESS = '0x712037beab9a29216650b8d032b4d9a59af8ad6c';
     const incentive = new Incentive();
     incentive.rewardToken = createIncentiveDto.rewardToken;
+    if (incentive.rewardToken.toLowerCase() !== TSWAP_ADDRESS.toLowerCase()) {
+      throw new Error('Invalid reward token');
+    }
     incentive.poolAddress = createIncentiveDto.poolAddress;
     incentive.startTime = createIncentiveDto.startTime.toString();
     incentive.endTime = createIncentiveDto.endTime.toString();
     incentive.vestingPeriod = createIncentiveDto.vestingPeriod.toString();
     incentive.totalRewardUnclaimed =
       createIncentiveDto.totalRewardUnclaimed.toString();
-    incentive.totalSecondsClaimedX128 = BigInt(0);
-    incentive.totalRewardClaimed = BigInt(0);
+    incentive.totalSecondsClaimedX128 = '0';
+    incentive.totalRewardClaimed = '0';
 
     // Generate a unique incentive ID using keccak256 hash
     const incentiveId = ethers.keccak256(
@@ -63,7 +67,6 @@ export class IncentiveService {
       ),
     );
     incentive.incentiveId = incentiveId;
-
     return this.incentiveRepository.save(incentive);
   }
 
@@ -134,9 +137,9 @@ export class IncentiveService {
       timeInRange >= vestingPeriod
         ? maxReward
         : (
-            (BigInt(maxReward) * BigInt(timeInRange)) /
-            BigInt(vestingPeriod)
-          ).toString();
+          (BigInt(maxReward) * BigInt(timeInRange)) /
+          BigInt(vestingPeriod)
+        ).toString();
 
     // Update last calculation time
     position.lastRewardCalculationTime = currentTime.toString();

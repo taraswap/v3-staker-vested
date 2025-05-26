@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, BadRequestException, HttpException } from '@nestjs/common';
 import { IncentiveService } from '../services/incentive.service';
 import { CreateIncentiveDto } from '../dto/create-incentive.dto';
 import { CalculateRewardsDto } from '../dto/calculate-rewards.dto';
@@ -8,13 +8,17 @@ import { RewardClaim } from '../entities/reward-claim.entity';
 
 @Controller('incentives')
 export class IncentiveController {
-  constructor(private readonly incentiveService: IncentiveService) {}
+  constructor(private readonly incentiveService: IncentiveService) { }
 
   @Post()
   async createIncentive(
     @Body() createIncentiveDto: CreateIncentiveDto,
   ): Promise<Incentive> {
-    return this.incentiveService.createIncentive(createIncentiveDto);
+    try {
+      return await this.incentiveService.createIncentive(createIncentiveDto);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
   }
 
   @Post('calculate-rewards')
