@@ -25,14 +25,22 @@ export class IncentiveController {
   async calculateRewards(
     @Body() calculateRewardsDto: CalculateRewardsDto,
   ): Promise<{ reward: string; maxReward: string }> {
-    return this.incentiveService.calculateRewards(calculateRewardsDto);
+    try {
+      return this.incentiveService.calculateRewards(calculateRewardsDto);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
   }
 
   @Post('claim')
   async claimReward(
     @Body() claimRewardDto: ClaimRewardDto,
   ): Promise<RewardClaim> {
-    return this.incentiveService.claimReward(claimRewardDto);
+    try {
+      return this.incentiveService.claimReward(claimRewardDto);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
   }
 
   @Get(':incentiveId')

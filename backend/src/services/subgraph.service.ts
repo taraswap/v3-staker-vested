@@ -6,6 +6,15 @@ export interface PositionData {
   owner: string;
   pool: {
     id: string;
+    liquidity: string;
+    token0: {
+      id: string;
+      symbol: string;
+    };
+    token1: {
+      id: string;
+      symbol: string;
+    };
   };
   token0: {
     id: string;
@@ -35,6 +44,15 @@ export class SubgraphService {
           owner
           pool {
             id
+            liquidity
+            token0 {
+              id
+              symbol
+            }
+            token1 {
+              id
+              symbol
+            }
           }
           token0 {
             id
@@ -77,4 +95,5 @@ export class SubgraphService {
       return null;
     }
   }
+
 } 

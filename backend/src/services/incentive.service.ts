@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Incentive } from '../entities/incentive.entity';
 import { Position } from '../entities/position.entity';
 import { Stake } from '../entities/stake.entity';
@@ -29,6 +29,7 @@ export class IncentiveService {
     private rewardClaimRepository: Repository<RewardClaim>,
     private configService: ConfigService,
     private subgraphService: SubgraphService,
+    private dataSource: DataSource,
   ) {
     this.TSWAP_TOKEN_ADDRESS = this.configService.get<string>(
       'TSWAP_TOKEN_ADDRESS',
@@ -41,11 +42,10 @@ export class IncentiveService {
   async createIncentive(
     createIncentiveDto: CreateIncentiveDto,
   ): Promise<Incentive> {
-    const TSWAP_ADDRESS = '0x712037beab9a29216650b8d032b4d9a59af8ad6c';
     const incentive = new Incentive();
     incentive.rewardToken = createIncentiveDto.rewardToken;
-    if (incentive.rewardToken.toLowerCase() !== TSWAP_ADDRESS.toLowerCase()) {
-      throw new Error('Invalid reward token');
+    if (incentive.rewardToken.toLowerCase() !== this.TSWAP_TOKEN_ADDRESS.toLowerCase()) {
+      throw new BadRequestException('Invalid reward token');
     }
     incentive.poolAddress = createIncentiveDto.poolAddress;
     incentive.startTime = createIncentiveDto.startTime.toString();
@@ -56,7 +56,6 @@ export class IncentiveService {
     incentive.totalSecondsClaimedX128 = '0';
     incentive.totalRewardClaimed = '0';
 
-    // Generate a unique incentive ID using keccak256 hash
     const incentiveId = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
         ['address', 'uint256', 'uint256', 'uint256'],
@@ -72,37 +71,6 @@ export class IncentiveService {
     return this.incentiveRepository.save(incentive);
   }
 
-  async joinIncentive(joinIncentiveDto: JoinIncentiveDto): Promise<Stake> {
-    const incentive = await this.incentiveRepository.findOne({
-      where: { incentiveId: joinIncentiveDto.incentiveId },
-    });
-
-    if (!incentive) {
-      throw new Error('Incentive not found');
-    }
-
-    const position = await this.positionRepository.findOne({
-      where: { tokenId: joinIncentiveDto.tokenId.toString() },
-    });
-
-    if (!position) {
-      throw new Error('Position not found');
-    }
-
-    if (position.ownerAddress !== joinIncentiveDto.ownerAddress) {
-      throw new Error('Not the owner of the position');
-    }
-
-    const stake = new Stake();
-    stake.incentive = incentive;
-    stake.position = position;
-    stake.secondsPerLiquidityInsideInitialX128 = '0'; // This should be fetched from the pool
-    stake.secondsInsideInitial = 0; // This should be fetched from the pool
-    stake.liquidity = position.liquidity;
-
-    return this.stakeRepository.save(stake);
-  }
-
   async calculateRewards(
     calculateRewardsDto: CalculateRewardsDto,
   ): Promise<{ reward: string; maxReward: string }> {
@@ -111,33 +79,22 @@ export class IncentiveService {
     });
 
     if (!incentive) {
-      throw new Error('Incentive not found');
+      throw new NotFoundException('Incentive not found');
     }
 
-    // Get position data from subgraph to find creation time and verify it exists
     const positionData = await this.subgraphService.getPositionData(
       calculateRewardsDto.tokenId.toString(),
     );
 
     if (!positionData) {
-      throw new Error('Position not found in subgraph');
+      throw new NotFoundException('Position not found in subgraph');
     }
 
-    // Verify the position is in the correct pool for this incentive
-    const position = await this.positionRepository.findOne({
-      where: { tokenId: calculateRewardsDto.tokenId.toString() },
-    });
-
-    if (!position) {
-      throw new Error('Position not found in database');
-    }
-
-    // Verify the position is in the correct pool for this incentive using subgraph data
     if (positionData.pool.id.toLowerCase() !== incentive.poolAddress.toLowerCase()) {
-      throw new Error('Position is not in the incentive pool');
+      console.log(positionData.pool.id.toLowerCase(), incentive.poolAddress.toLowerCase())
+      throw new BadRequestException('Position is not in the incentive pool');
     }
 
-    // Get the last reward claim for this position and incentive
     const lastClaim = await this.rewardClaimRepository.findOne({
       where: {
         tokenId: calculateRewardsDto.tokenId.toString(),
@@ -146,43 +103,37 @@ export class IncentiveService {
       order: { claimedAt: 'DESC' },
     });
 
-    // Get current time and incentive parameters
     const currentTime = Math.floor(Date.now() / 1000);
     const startTime = parseInt(incentive.startTime);
     const endTime = parseInt(incentive.endTime);
     const vestingPeriod = parseInt(incentive.vestingPeriod);
     const positionCreatedAt = parseInt(positionData.transaction.timestamp);
 
-    // Determine the start time for reward calculation
-    // Priority: last claim time > position creation time > incentive start time
-    let rewardStartTime: number;
-    if (lastClaim && lastClaim.claimedAt) {
-      // Use the time of the last claim
-      rewardStartTime = Math.floor(new Date(lastClaim.claimedAt).getTime() / 1000);
-    } else {
-      // Use the later of position creation time or incentive start time
-      rewardStartTime = Math.max(positionCreatedAt, startTime);
-    }
+    const rewardStartTime = lastClaim && lastClaim.claimedAt ?
+      Math.floor(new Date(lastClaim.claimedAt).getTime() / 1000) :
+      Math.max(positionCreatedAt, startTime);
 
-    // Calculate the actual time in range for reward calculation
     const rewardEndTime = Math.min(currentTime, endTime);
     const timeInRange = Math.max(0, rewardEndTime - rewardStartTime);
-
-    // For simplified reward calculation, we'll assume each position gets an equal share
-    // of the total reward pool based on time participation
-    // In a more sophisticated system, this could be weighted by liquidity amount
-
-    // Calculate the maximum possible reward for any position
     const totalIncentiveReward = BigInt(incentive.totalRewardUnclaimed);
 
-    // Since we're not using stake-based calculation, we'll use a simplified approach:
-    // Each position that participates gets rewards proportional to their liquidity and time
-    const positionLiquidity = BigInt(positionData.liquidity || position.liquidity || '1');
+    const positionLiquidity = BigInt(positionData.liquidity || '0');
+    console.log('positionLiquidity', positionLiquidity)
 
-    // For now, we'll assume this position gets a proportional share based on liquidity
-    // In a real implementation, you might want to track all participating positions
-    // and calculate the total liquidity across all positions in this pool
-    const positionMaxReward = totalIncentiveReward; // Simplified - in reality should be proportional
+    if (positionLiquidity === BigInt(0)) {
+      return {
+        reward: '0',
+        maxReward: '0',
+      };
+    }
+
+    // Get total pool liquidity from the position data (no separate query needed)
+    const totalPoolLiquidity = BigInt(positionData.pool.liquidity || '1');
+    console.log('totalPoolLiquidity', totalPoolLiquidity)
+
+    // Calculate position's share of total rewards based on liquidity proportion
+    const positionMaxReward = (totalIncentiveReward * positionLiquidity) / totalPoolLiquidity;
+    console.log('positionMaxReward', positionMaxReward)
 
     // Calculate rewards based on time in range and vesting period
     let earnedReward: bigint;
@@ -210,46 +161,20 @@ export class IncentiveService {
   }
 
   async claimReward(claimRewardDto: ClaimRewardDto): Promise<RewardClaim> {
-    // Calculate current rewards
     const { reward } = await this.calculateRewards({
       incentiveId: claimRewardDto.incentiveId,
       tokenId: claimRewardDto.tokenId,
     });
 
     if (BigInt(reward) <= BigInt(0)) {
-      throw new Error('No rewards to claim');
+      throw new BadRequestException('No rewards to claim');
     }
 
-    // Get previous total claimed amount for this position and incentive
-    const previousClaims = await this.rewardClaimRepository.find({
-      where: {
-        tokenId: claimRewardDto.tokenId.toString(),
-        incentiveId: claimRewardDto.incentiveId,
-      },
-    });
-
-    const totalPreviouslyClaimed = previousClaims.reduce(
-      (sum, claim) => sum + BigInt(claim.amount || '0'),
-      BigInt(0),
-    );
-
-    // Calculate new total claimed amount
-    const newTotalClaimed = totalPreviouslyClaimed + BigInt(reward);
-
-    // Create reward claim record
-    const rewardClaim = new RewardClaim();
-    rewardClaim.userAddress = claimRewardDto.userAddress;
-    rewardClaim.amount = reward;
-    rewardClaim.incentiveId = claimRewardDto.incentiveId;
-    rewardClaim.tokenId = claimRewardDto.tokenId.toString();
-
-    // Send TSWAP tokens using the reward wallet
     const provider = new ethers.JsonRpcProvider(
       this.configService.get<string>('RPC_URL'),
     );
     const wallet = new ethers.Wallet(this.REWARD_WALLET_PRIVATE_KEY, provider);
 
-    // TSWAP token contract ABI (minimal for transfer)
     const tokenAbi = [
       'function transfer(address to, uint256 amount) returns (bool)',
     ];
@@ -259,52 +184,55 @@ export class IncentiveService {
       wallet,
     );
 
+    let receipt: any;
     try {
       const tx = await tokenContract.transfer(
         claimRewardDto.userAddress,
         reward,
       );
-      await tx.wait(); // Wait for transaction confirmation
+      receipt = await tx.wait();
     } catch (error) {
-      throw new Error(`Failed to send rewards: ${error.message}`);
+      throw new BadRequestException(`Failed to send rewards: ${error.message}`);
     }
 
-    return this.rewardClaimRepository.save(rewardClaim);
-  }
+    if (!receipt || receipt.status !== 1) {
+      throw new BadRequestException('Transaction failed to send rewards');
+    }
 
-  /**
-   * REWARD CALCULATION EXPLANATION:
-   * 
-   * The reward calculation follows this formula for automatic position-based rewards:
-   * 
-   * 1. Position Eligibility = Position must be in the incentive's target pool
-   * 2. Time in Range = min(Current Time, Incentive End Time) - max(Last Claim Time || Position Creation Time, Incentive Start Time)
-   * 3. Time Factor = min(Time in Range, Vesting Period) / Vesting Period
-   * 4. Earned Reward = Total Incentive Reward × Time Factor
-   * 5. Claimable Reward = Earned Reward - Previously Claimed
-   * 
-   * Where:
-   * - Position Creation Time = Timestamp when the NFT position was minted (from subgraph)
-   * - Last Claim Time = Timestamp of the most recent reward claim for this position + incentive
-   * - Vesting Period = The period over which rewards vest linearly
-   * - Total Incentive Reward = Total reward pool allocated to this incentive
-   * 
-   * Key Points:
-   * - No explicit staking required - positions automatically earn rewards if in correct pool
-   * - Rewards are calculated from position creation time or last claim time (whichever is later)
-   * - Rewards vest linearly over the vesting period
-   * - Users can claim accumulated rewards at any time
-   * - Each position tracks its own claim history per incentive
-   * - Position must be in the same pool as the incentive to be eligible
-   * 
-   * Example:
-   * - Position created: Day 1
-   * - Incentive starts: Day 5, ends: Day 15, vesting period: 10 days
-   * - User claims on Day 12
-   * - Time in range: Day 5 to Day 12 = 7 days
-   * - Time factor: 7/10 = 0.7
-   * - Claimable reward: Total Reward × 0.7
-   */
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const rewardClaim = new RewardClaim();
+      rewardClaim.userAddress = claimRewardDto.userAddress;
+      rewardClaim.amount = reward;
+      rewardClaim.incentiveId = claimRewardDto.incentiveId;
+      rewardClaim.tokenId = claimRewardDto.tokenId.toString();
+      rewardClaim.claimedAt = Math.floor(Date.now() / 1000);
+
+      const savedRewardClaim = await queryRunner.manager.save(RewardClaim, rewardClaim);
+      const incentive = await queryRunner.manager.findOne(Incentive, {
+        where: { incentiveId: claimRewardDto.incentiveId },
+      });
+
+      if (!incentive) {
+        throw new NotFoundException('Incentive not found');
+      }
+
+      incentive.totalRewardUnclaimed = (BigInt(incentive.totalRewardUnclaimed) - BigInt(reward)).toString();
+      incentive.totalRewardClaimed = (BigInt(incentive.totalRewardClaimed) + BigInt(reward)).toString();
+      await queryRunner.manager.update(Incentive, incentive.incentiveId, incentive);
+
+      await queryRunner.commitTransaction();
+      return savedRewardClaim;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw new BadRequestException(`Failed to save reward claim: ${error.message}`);
+    } finally {
+      await queryRunner.release();
+    }
+  }
 
   async getIncentive(incentiveId: string): Promise<Incentive> {
     const incentive = await this.incentiveRepository.findOne({
@@ -313,7 +241,7 @@ export class IncentiveService {
     });
 
     if (!incentive) {
-      throw new Error('Incentive not found');
+      throw new NotFoundException('Incentive not found');
     }
 
     return incentive;
