@@ -22,6 +22,6 @@ export class RewardClaim {
   @Column('bigint')
   tokenId: string;
 
-  @CreateDateColumn()
-  claimedAt: Date;
+  @Column('timestamp')
+  claimedAt: number;
 }

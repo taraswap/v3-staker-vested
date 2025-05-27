@@ -19,7 +19,7 @@ export class RewardService {
     @InjectRepository(RewardClaim)
     private rewardClaimRepository: Repository<RewardClaim>,
     private rewardCalculator: RewardCalculator,
-  ) {}
+  ) { }
 
   async calculateRewards(positionId: string, incentiveId: string) {
     const position = await this.positionRepository.findOne({

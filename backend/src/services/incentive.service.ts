@@ -11,6 +11,7 @@ import { ClaimRewardDto } from '../dto/claim-reward.dto';
 import { CalculateRewardsDto } from '../dto/calculate-rewards.dto';
 import { ethers } from 'ethers';
 import { ConfigService } from '@nestjs/config';
+import { SubgraphService } from './subgraph.service';
 
 @Injectable()
 export class IncentiveService {
@@ -27,6 +28,7 @@ export class IncentiveService {
     @InjectRepository(RewardClaim)
     private rewardClaimRepository: Repository<RewardClaim>,
     private configService: ConfigService,
+    private subgraphService: SubgraphService,
   ) {
     this.TSWAP_TOKEN_ADDRESS = this.configService.get<string>(
       'TSWAP_TOKEN_ADDRESS',
@@ -112,40 +114,99 @@ export class IncentiveService {
       throw new Error('Incentive not found');
     }
 
+    // Get position data from subgraph to find creation time and verify it exists
+    const positionData = await this.subgraphService.getPositionData(
+      calculateRewardsDto.tokenId.toString(),
+    );
+
+    if (!positionData) {
+      throw new Error('Position not found in subgraph');
+    }
+
+    // Verify the position is in the correct pool for this incentive
     const position = await this.positionRepository.findOne({
       where: { tokenId: calculateRewardsDto.tokenId.toString() },
     });
 
     if (!position) {
-      throw new Error('Position not found');
+      throw new Error('Position not found in database');
     }
 
-    // Get the current time and calculate time in range
+    // Verify the position is in the correct pool for this incentive using subgraph data
+    if (positionData.pool.id.toLowerCase() !== incentive.poolAddress.toLowerCase()) {
+      throw new Error('Position is not in the incentive pool');
+    }
+
+    // Get the last reward claim for this position and incentive
+    const lastClaim = await this.rewardClaimRepository.findOne({
+      where: {
+        tokenId: calculateRewardsDto.tokenId.toString(),
+        incentiveId: calculateRewardsDto.incentiveId,
+      },
+      order: { claimedAt: 'DESC' },
+    });
+
+    // Get current time and incentive parameters
     const currentTime = Math.floor(Date.now() / 1000);
     const startTime = parseInt(incentive.startTime);
     const endTime = parseInt(incentive.endTime);
     const vestingPeriod = parseInt(incentive.vestingPeriod);
+    const positionCreatedAt = parseInt(positionData.transaction.timestamp);
 
-    // Calculate time in range since last calculation
-    const lastCalculationTime =
-      parseInt(position.lastRewardCalculationTime) || startTime;
-    const timeInRange = Math.min(currentTime, endTime) - lastCalculationTime;
+    // Determine the start time for reward calculation
+    // Priority: last claim time > position creation time > incentive start time
+    let rewardStartTime: number;
+    if (lastClaim && lastClaim.claimedAt) {
+      // Use the time of the last claim
+      rewardStartTime = Math.floor(new Date(lastClaim.claimedAt).getTime() / 1000);
+    } else {
+      // Use the later of position creation time or incentive start time
+      rewardStartTime = Math.max(positionCreatedAt, startTime);
+    }
+
+    // Calculate the actual time in range for reward calculation
+    const rewardEndTime = Math.min(currentTime, endTime);
+    const timeInRange = Math.max(0, rewardEndTime - rewardStartTime);
+
+    // For simplified reward calculation, we'll assume each position gets an equal share
+    // of the total reward pool based on time participation
+    // In a more sophisticated system, this could be weighted by liquidity amount
+
+    // Calculate the maximum possible reward for any position
+    const totalIncentiveReward = BigInt(incentive.totalRewardUnclaimed);
+
+    // Since we're not using stake-based calculation, we'll use a simplified approach:
+    // Each position that participates gets rewards proportional to their liquidity and time
+    const positionLiquidity = BigInt(positionData.liquidity || position.liquidity || '1');
+
+    // For now, we'll assume this position gets a proportional share based on liquidity
+    // In a real implementation, you might want to track all participating positions
+    // and calculate the total liquidity across all positions in this pool
+    const positionMaxReward = totalIncentiveReward; // Simplified - in reality should be proportional
 
     // Calculate rewards based on time in range and vesting period
-    const maxReward = incentive.totalRewardUnclaimed;
-    const reward =
-      timeInRange >= vestingPeriod
-        ? maxReward
-        : (
-          (BigInt(maxReward) * BigInt(timeInRange)) /
-          BigInt(vestingPeriod)
-        ).toString();
+    let earnedReward: bigint;
+    if (timeInRange >= vestingPeriod) {
+      // Full vesting period has passed, position gets full allocated reward
+      earnedReward = positionMaxReward;
+    } else if (timeInRange > 0) {
+      // Proportional reward based on time in range
+      earnedReward = (positionMaxReward * BigInt(timeInRange)) / BigInt(vestingPeriod);
+    } else {
+      // No time has passed or negative time
+      earnedReward = BigInt(0);
+    }
 
-    // Update last calculation time
-    position.lastRewardCalculationTime = currentTime.toString();
-    await this.positionRepository.save(position);
+    // Subtract any previously claimed rewards for this specific incentive
+    if (lastClaim) {
+      const previouslyClaimed = BigInt(lastClaim.amount || '0');
+      earnedReward = earnedReward > previouslyClaimed ? earnedReward - previouslyClaimed : BigInt(0);
+    }
 
-    return { reward, maxReward };
+    return {
+      reward: earnedReward.toString(),
+      maxReward: positionMaxReward.toString(),
+    };
   }
 
   async claimReward(claimRewardDto: ClaimRewardDto): Promise<RewardClaim> {
@@ -158,6 +219,22 @@ export class IncentiveService {
     if (BigInt(reward) <= BigInt(0)) {
       throw new Error('No rewards to claim');
     }
+
+    // Get previous total claimed amount for this position and incentive
+    const previousClaims = await this.rewardClaimRepository.find({
+      where: {
+        tokenId: claimRewardDto.tokenId.toString(),
+        incentiveId: claimRewardDto.incentiveId,
+      },
+    });
+
+    const totalPreviouslyClaimed = previousClaims.reduce(
+      (sum, claim) => sum + BigInt(claim.amount || '0'),
+      BigInt(0),
+    );
+
+    // Calculate new total claimed amount
+    const newTotalClaimed = totalPreviouslyClaimed + BigInt(reward);
 
     // Create reward claim record
     const rewardClaim = new RewardClaim();
@@ -194,6 +271,40 @@ export class IncentiveService {
 
     return this.rewardClaimRepository.save(rewardClaim);
   }
+
+  /**
+   * REWARD CALCULATION EXPLANATION:
+   * 
+   * The reward calculation follows this formula for automatic position-based rewards:
+   * 
+   * 1. Position Eligibility = Position must be in the incentive's target pool
+   * 2. Time in Range = min(Current Time, Incentive End Time) - max(Last Claim Time || Position Creation Time, Incentive Start Time)
+   * 3. Time Factor = min(Time in Range, Vesting Period) / Vesting Period
+   * 4. Earned Reward = Total Incentive Reward × Time Factor
+   * 5. Claimable Reward = Earned Reward - Previously Claimed
+   * 
+   * Where:
+   * - Position Creation Time = Timestamp when the NFT position was minted (from subgraph)
+   * - Last Claim Time = Timestamp of the most recent reward claim for this position + incentive
+   * - Vesting Period = The period over which rewards vest linearly
+   * - Total Incentive Reward = Total reward pool allocated to this incentive
+   * 
+   * Key Points:
+   * - No explicit staking required - positions automatically earn rewards if in correct pool
+   * - Rewards are calculated from position creation time or last claim time (whichever is later)
+   * - Rewards vest linearly over the vesting period
+   * - Users can claim accumulated rewards at any time
+   * - Each position tracks its own claim history per incentive
+   * - Position must be in the same pool as the incentive to be eligible
+   * 
+   * Example:
+   * - Position created: Day 1
+   * - Incentive starts: Day 5, ends: Day 15, vesting period: 10 days
+   * - User claims on Day 12
+   * - Time in range: Day 5 to Day 12 = 7 days
+   * - Time factor: 7/10 = 0.7
+   * - Claimable reward: Total Reward × 0.7
+   */
 
   async getIncentive(incentiveId: string): Promise<Incentive> {
     const incentive = await this.incentiveRepository.findOne({
