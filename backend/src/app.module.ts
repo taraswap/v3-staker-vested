@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { RewardModule } from './modules/reward.module';
 import { IncentiveModule } from './modules/incentive.module';
 import configuration from './config/configuration';
 
@@ -25,8 +24,7 @@ import configuration from './config/configuration';
       }),
       inject: [ConfigService],
     }),
-    RewardModule,
     IncentiveModule,
   ],
 })
-export class AppModule {}
+export class AppModule { }

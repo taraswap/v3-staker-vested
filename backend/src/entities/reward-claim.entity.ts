@@ -24,4 +24,7 @@ export class RewardClaim {
 
   @CreateDateColumn({ type: 'timestamp', name: 'claimed_at' })
   claimedAt: Date;
+
+  @Column({ name: 'tx_hash' })
+  txHash: string;
 }

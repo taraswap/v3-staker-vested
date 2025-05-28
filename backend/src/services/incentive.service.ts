@@ -2,11 +2,8 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Incentive } from '../entities/incentive.entity';
-import { Position } from '../entities/position.entity';
-import { Stake } from '../entities/stake.entity';
 import { RewardClaim } from '../entities/reward-claim.entity';
 import { CreateIncentiveDto } from '../dto/create-incentive.dto';
-import { JoinIncentiveDto } from '../dto/join-incentive.dto';
 import { ClaimRewardDto } from '../dto/claim-reward.dto';
 import { CalculateRewardsDto } from '../dto/calculate-rewards.dto';
 import { ethers } from 'ethers';
@@ -21,10 +18,6 @@ export class IncentiveService {
   constructor(
     @InjectRepository(Incentive)
     private incentiveRepository: Repository<Incentive>,
-    @InjectRepository(Position)
-    private positionRepository: Repository<Position>,
-    @InjectRepository(Stake)
-    private stakeRepository: Repository<Stake>,
     @InjectRepository(RewardClaim)
     private rewardClaimRepository: Repository<RewardClaim>,
     private configService: ConfigService,
@@ -53,7 +46,6 @@ export class IncentiveService {
     incentive.vestingPeriod = createIncentiveDto.vestingPeriod.toString();
     incentive.totalRewardUnclaimed =
       createIncentiveDto.totalRewardUnclaimed.toString();
-    incentive.totalSecondsClaimedX128 = '0';
     incentive.totalRewardClaimed = '0';
 
     const incentiveId = ethers.keccak256(
@@ -201,6 +193,7 @@ export class IncentiveService {
       rewardClaim.amount = reward;
       rewardClaim.incentiveId = claimRewardDto.incentiveId;
       rewardClaim.tokenId = claimRewardDto.tokenId;
+      rewardClaim.txHash = receipt.hash;
 
       const savedRewardClaim = await queryRunner.manager.save(RewardClaim, rewardClaim);
       const incentive = await queryRunner.manager.findOne(Incentive, {

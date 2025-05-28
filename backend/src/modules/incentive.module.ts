@@ -4,13 +4,11 @@ import { IncentiveController } from '../controllers/incentive.controller';
 import { IncentiveService } from '../services/incentive.service';
 import { SubgraphService } from '../services/subgraph.service';
 import { Incentive } from '../entities/incentive.entity';
-import { Position } from '../entities/position.entity';
-import { Stake } from '../entities/stake.entity';
 import { RewardClaim } from '../entities/reward-claim.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Incentive, Position, Stake, RewardClaim]),
+    TypeOrmModule.forFeature([Incentive, RewardClaim]),
   ],
   controllers: [IncentiveController],
   providers: [IncentiveService, SubgraphService],
