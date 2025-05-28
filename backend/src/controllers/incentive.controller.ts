@@ -15,6 +15,9 @@ export class IncentiveController {
     @Body() createIncentiveDto: CreateIncentiveDto,
   ): Promise<Incentive> {
     try {
+      if (!createIncentiveDto.rewardToken || !createIncentiveDto.poolAddress || !createIncentiveDto.startTime || !createIncentiveDto.endTime || !createIncentiveDto.vestingPeriod || !createIncentiveDto.totalRewardUnclaimed) {
+        throw new BadRequestException('Invalid request');
+      }
       return await this.incentiveService.createIncentive(createIncentiveDto);
     } catch (error) {
       throw new BadRequestException(error.message);
@@ -26,6 +29,9 @@ export class IncentiveController {
     @Body() calculateRewardsDto: CalculateRewardsDto,
   ): Promise<{ reward: string; maxReward: string }> {
     try {
+      if (!calculateRewardsDto.incentiveId || !calculateRewardsDto.tokenId) {
+        throw new BadRequestException('Invalid request');
+      }
       return this.incentiveService.calculateRewards(calculateRewardsDto);
     } catch (error) {
       throw new BadRequestException(error.message);
@@ -37,6 +43,9 @@ export class IncentiveController {
     @Body() claimRewardDto: ClaimRewardDto,
   ): Promise<RewardClaim> {
     try {
+      if (!claimRewardDto.userAddress || !claimRewardDto.incentiveId || !claimRewardDto.tokenId) {
+        throw new BadRequestException('Invalid request');
+      }
       return this.incentiveService.claimReward(claimRewardDto);
     } catch (error) {
       throw new BadRequestException(error.message);

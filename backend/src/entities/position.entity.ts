@@ -15,24 +15,24 @@ export class Position {
   @OneToMany(() => Stake, (stake) => stake.position)
   stakes: Stake[];
 
-  @Column('bigint')
+  @Column('bigint', { name: 'token_id' })
   tokenId: string;
 
-  @Column()
+  @Column({ name: 'owner_address' })
   ownerAddress: string;
 
-  @Column()
+  @Column({ name: 'tick_lower' })
   tickLower: number;
 
-  @Column()
+  @Column({ name: 'tick_upper' })
   tickUpper: number;
 
   @Column('bigint')
   liquidity: string;
 
-  @Column('bigint', { default: '0' })
+  @Column('bigint', { default: '0', name: 'last_reward_calculation_time' })
   lastRewardCalculationTime: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

@@ -10,18 +10,18 @@ export class RewardClaim {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ name: 'user_address' })
   userAddress: string;
 
   @Column('bigint')
   amount: string;
 
-  @Column()
+  @Column({ name: 'incentive_id' })
   incentiveId: string;
 
-  @Column('bigint')
-  tokenId: string;
+  @Column('bigint', { name: 'token_id' })
+  tokenId: number;
 
-  @Column('timestamp')
-  claimedAt: number;
+  @CreateDateColumn({ type: 'timestamp', name: 'claimed_at' })
+  claimedAt: Date;
 }

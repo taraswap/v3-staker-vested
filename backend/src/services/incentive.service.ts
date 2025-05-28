@@ -97,7 +97,7 @@ export class IncentiveService {
 
     const lastClaim = await this.rewardClaimRepository.findOne({
       where: {
-        tokenId: calculateRewardsDto.tokenId.toString(),
+        tokenId: calculateRewardsDto.tokenId,
         incentiveId: calculateRewardsDto.incentiveId,
       },
       order: { claimedAt: 'DESC' },
@@ -114,11 +114,12 @@ export class IncentiveService {
       Math.max(positionCreatedAt, startTime);
 
     const rewardEndTime = Math.min(currentTime, endTime);
+    console.log('endTime', new Date(endTime * 1000).toISOString())
+    console.log('rewardEndTime', new Date(rewardEndTime * 1000).toISOString())
     const timeInRange = Math.max(0, rewardEndTime - rewardStartTime);
     const totalIncentiveReward = BigInt(incentive.totalRewardUnclaimed);
 
     const positionLiquidity = BigInt(positionData.liquidity || '0');
-    console.log('positionLiquidity', positionLiquidity)
 
     if (positionLiquidity === BigInt(0)) {
       return {
@@ -127,28 +128,19 @@ export class IncentiveService {
       };
     }
 
-    // Get total pool liquidity from the position data (no separate query needed)
     const totalPoolLiquidity = BigInt(positionData.pool.liquidity || '1');
-    console.log('totalPoolLiquidity', totalPoolLiquidity)
 
-    // Calculate position's share of total rewards based on liquidity proportion
     const positionMaxReward = (totalIncentiveReward * positionLiquidity) / totalPoolLiquidity;
-    console.log('positionMaxReward', positionMaxReward)
 
-    // Calculate rewards based on time in range and vesting period
     let earnedReward: bigint;
     if (timeInRange >= vestingPeriod) {
-      // Full vesting period has passed, position gets full allocated reward
       earnedReward = positionMaxReward;
     } else if (timeInRange > 0) {
-      // Proportional reward based on time in range
       earnedReward = (positionMaxReward * BigInt(timeInRange)) / BigInt(vestingPeriod);
     } else {
-      // No time has passed or negative time
       earnedReward = BigInt(0);
     }
 
-    // Subtract any previously claimed rewards for this specific incentive
     if (lastClaim) {
       const previouslyClaimed = BigInt(lastClaim.amount || '0');
       earnedReward = earnedReward > previouslyClaimed ? earnedReward - previouslyClaimed : BigInt(0);
@@ -170,13 +162,16 @@ export class IncentiveService {
       throw new BadRequestException('No rewards to claim');
     }
 
+    const amount = ethers.formatUnits(reward, 18);
+    console.log('Sending reward:', amount, 'TSWAP to', claimRewardDto.userAddress);
+
     const provider = new ethers.JsonRpcProvider(
       this.configService.get<string>('RPC_URL'),
     );
     const wallet = new ethers.Wallet(this.REWARD_WALLET_PRIVATE_KEY, provider);
 
     const tokenAbi = [
-      'function transfer(address to, uint256 amount) returns (bool)',
+      "function transfer(address to, uint256 amount) returns (bool)",
     ];
     const tokenContract = new ethers.Contract(
       this.TSWAP_TOKEN_ADDRESS,
@@ -208,8 +203,7 @@ export class IncentiveService {
       rewardClaim.userAddress = claimRewardDto.userAddress;
       rewardClaim.amount = reward;
       rewardClaim.incentiveId = claimRewardDto.incentiveId;
-      rewardClaim.tokenId = claimRewardDto.tokenId.toString();
-      rewardClaim.claimedAt = Math.floor(Date.now() / 1000);
+      rewardClaim.tokenId = claimRewardDto.tokenId;
 
       const savedRewardClaim = await queryRunner.manager.save(RewardClaim, rewardClaim);
       const incentive = await queryRunner.manager.findOne(Incentive, {
@@ -222,7 +216,7 @@ export class IncentiveService {
 
       incentive.totalRewardUnclaimed = (BigInt(incentive.totalRewardUnclaimed) - BigInt(reward)).toString();
       incentive.totalRewardClaimed = (BigInt(incentive.totalRewardClaimed) + BigInt(reward)).toString();
-      await queryRunner.manager.update(Incentive, incentive.incentiveId, incentive);
+      await queryRunner.manager.update(Incentive, incentive.id, incentive);
 
       await queryRunner.commitTransaction();
       return savedRewardClaim;

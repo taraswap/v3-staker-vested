@@ -4,6 +4,7 @@ import {
   PrimaryGeneratedColumn,
   CreateDateColumn,
   OneToMany,
+  Index,
 } from 'typeorm';
 import { Stake } from './stake.entity';
 
@@ -15,33 +16,34 @@ export class Incentive {
   @OneToMany(() => Stake, (stake) => stake.incentive)
   stakes: Stake[];
 
-  @Column()
+  @Column({ name: 'incentive_id' })
+  @Index({ unique: true })
   incentiveId: string;
 
-  @Column()
+  @Column({ name: 'pool_address' })
   poolAddress: string;
 
-  @Column('bigint')
+  @Column('bigint', { name: 'start_time' })
   startTime: string;
 
-  @Column('bigint')
+  @Column('bigint', { name: 'end_time' })
   endTime: string;
 
-  @Column('bigint')
+  @Column('bigint', { name: 'vesting_period' })
   vestingPeriod: string;
 
-  @Column('bigint')
+  @Column('bigint', { name: 'total_reward_unclaimed' })
   totalRewardUnclaimed: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
-  @Column('varchar', { length: 42 })
+  @Column('varchar', { length: 42, name: 'reward_token' })
   rewardToken: string;
 
-  @Column('bigint')
+  @Column('bigint', { name: 'total_seconds_claimed_x128' })
   totalSecondsClaimedX128: string;
 
-  @Column('bigint')
+  @Column('bigint', { name: 'total_reward_claimed' })
   totalRewardClaimed: string;
 }
