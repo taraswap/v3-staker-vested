@@ -91,7 +91,6 @@ export class IncentiveService {
     }
 
     if (positionData.pool.id.toLowerCase() !== incentive.poolAddress.toLowerCase()) {
-      console.log(positionData.pool.id.toLowerCase(), incentive.poolAddress.toLowerCase())
       throw new BadRequestException('Position is not in the incentive pool');
     }
 
@@ -114,8 +113,6 @@ export class IncentiveService {
       Math.max(positionCreatedAt, startTime);
 
     const rewardEndTime = Math.min(currentTime, endTime);
-    console.log('endTime', new Date(endTime * 1000).toISOString())
-    console.log('rewardEndTime', new Date(rewardEndTime * 1000).toISOString())
     const timeInRange = Math.max(0, rewardEndTime - rewardStartTime);
     const totalIncentiveReward = BigInt(incentive.totalRewardUnclaimed);
 
