@@ -105,6 +105,21 @@ export class IncentiveService {
       Math.max(positionCreatedAt, startTime);
 
     const rewardEndTime = Math.min(currentTime, endTime);
+
+    const positionWasInRange = await this.subgraphService.checkPositionInRangeDuringPeriod(
+      calculateRewardsDto.tokenId.toString(),
+      incentive.poolAddress.toLowerCase(),
+      rewardStartTime,
+      rewardEndTime
+    );
+
+    if (!positionWasInRange) {
+      return {
+        reward: '0',
+        maxReward: '0',
+      };
+    }
+
     const timeInRange = Math.max(0, rewardEndTime - rewardStartTime);
     const totalIncentiveReward = BigInt(incentive.totalRewardUnclaimed);
 
