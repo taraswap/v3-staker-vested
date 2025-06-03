@@ -65,7 +65,17 @@ export class IncentiveService {
 
   async calculateRewards(
     calculateRewardsDto: CalculateRewardsDto,
-  ): Promise<{ reward: string; maxReward: string }> {
+  ): Promise<{
+    reward: string;
+    maxReward: string;
+    feeData?: {
+      totalAccruedFeesToken0: string;
+      totalAccruedFeesToken1: string;
+      totalCollectedFeesToken0: string;
+      totalCollectedFeesToken1: string;
+      feeMultiplier: string;
+    };
+  }> {
     const incentive = await this.incentiveRepository.findOne({
       where: { incentiveId: calculateRewardsDto.incentiveId },
     });
@@ -106,18 +116,50 @@ export class IncentiveService {
 
     const rewardEndTime = Math.min(currentTime, endTime);
 
-    const positionWasInRange = await this.subgraphService.checkPositionInRangeDuringPeriod(
+    // const positionWasInRange = await this.subgraphService.checkPositionInRangeDuringPeriod(
+    //   calculateRewardsDto.tokenId.toString(),
+    //   incentive.poolAddress.toLowerCase(),
+    //   rewardStartTime,
+    //   rewardEndTime
+    // );
+
+    // if (!positionWasInRange) {
+    //   return {
+    //     reward: '0',
+    //     maxReward: '0',
+    //   };
+    // }
+
+    // Get fee collection data for the position during the reward period
+    const feeCollectionData = await this.subgraphService.getPositionFeeCollectionData(
       calculateRewardsDto.tokenId.toString(),
-      incentive.poolAddress.toLowerCase(),
       rewardStartTime,
       rewardEndTime
     );
+    console.log('feeCollectionData', feeCollectionData)
 
-    if (!positionWasInRange) {
-      return {
-        reward: '0',
-        maxReward: '0',
-      };
+    // If no accrued fees data is available, estimate from swaps
+    let totalFeesAccrued = BigInt(feeCollectionData.totalAccruedFeesToken0) +
+      BigInt(feeCollectionData.totalAccruedFeesToken1);
+
+    if (totalFeesAccrued === BigInt(0)) {
+      console.log('No direct fee data');
+      // const feeEstimate = await this.subgraphService.getPositionFeeEstimateFromSwaps(
+      //   calculateRewardsDto.tokenId.toString(),
+      //   incentive.poolAddress.toLowerCase(),
+      //   rewardStartTime,
+      //   rewardEndTime
+      // );
+
+      // totalFeesAccrued = BigInt(feeEstimate.estimatedFeesToken0) +
+      //   BigInt(feeEstimate.estimatedFeesToken1);
+
+      // console.log('Fee estimate from swaps:', {
+      //   estimatedFeesToken0: feeEstimate.estimatedFeesToken0,
+      //   estimatedFeesToken1: feeEstimate.estimatedFeesToken1,
+      //   swapCount: feeEstimate.swapCount,
+      //   totalEstimated: totalFeesAccrued.toString()
+      // });
     }
 
     const timeInRange = Math.max(0, rewardEndTime - rewardStartTime);
@@ -134,7 +176,33 @@ export class IncentiveService {
 
     const totalPoolLiquidity = BigInt(positionData.pool.liquidity || '1');
 
-    const positionMaxReward = (totalIncentiveReward * positionLiquidity) / totalPoolLiquidity;
+    // Base position reward proportional to liquidity
+    const basePositionMaxReward = (totalIncentiveReward * positionLiquidity) / totalPoolLiquidity;
+
+    // Calculate fee collection multiplier
+    // This rewards positions that generate more trading fees
+    // Fee multiplier ranges from 1.0 (no fees) to 2.0 (high fees)
+    // The multiplier is based on accrued/estimated fees relative to position liquidity
+    let feeMultiplier = BigInt(1000); // Base multiplier * 1000 for precision
+
+    if (totalFeesAccrued > BigInt(0) && positionLiquidity > BigInt(0)) {
+      // Calculate fees as percentage of liquidity (in basis points)
+      const feeRatio = (totalFeesAccrued * BigInt(10000)) / positionLiquidity;
+
+      // Multiplier increases with fee ratio, capped at 2.0x
+      // Formula: 1.0 + min(feeRatio / 1000, 1.0)
+      const bonusMultiplier = feeRatio > BigInt(1000) ? BigInt(1000) : feeRatio;
+      feeMultiplier = BigInt(1000) + bonusMultiplier; // 1000-2000 range
+    }
+
+    console.log('Fee multiplier calculation:', {
+      totalFeesAccrued: totalFeesAccrued.toString(),
+      positionLiquidity: positionLiquidity.toString(),
+      feeMultiplier: feeMultiplier.toString()
+    });
+
+    // Apply fee multiplier to max reward
+    const positionMaxReward = (basePositionMaxReward * feeMultiplier) / BigInt(1000);
 
     let earnedReward: bigint;
     if (timeInRange >= vestingPeriod) {
@@ -153,6 +221,13 @@ export class IncentiveService {
     return {
       reward: earnedReward.toString(),
       maxReward: positionMaxReward.toString(),
+      feeData: {
+        totalAccruedFeesToken0: feeCollectionData.totalAccruedFeesToken0,
+        totalAccruedFeesToken1: feeCollectionData.totalAccruedFeesToken1,
+        totalCollectedFeesToken0: feeCollectionData.totalCollectedFeesToken0,
+        totalCollectedFeesToken1: feeCollectionData.totalCollectedFeesToken1,
+        feeMultiplier: (feeMultiplier / BigInt(10)).toString(), // Convert back to decimal (divide by 10 for 1 decimal place)
+      },
     };
   }
 
