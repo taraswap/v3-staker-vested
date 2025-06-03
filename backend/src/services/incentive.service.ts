@@ -84,17 +84,10 @@ export class IncentiveService {
       throw new NotFoundException('Incentive not found');
     }
 
-    const positionData = await this.subgraphService.getPositionData(
-      calculateRewardsDto.tokenId.toString(),
-    );
-
-    if (!positionData) {
-      throw new NotFoundException('Position not found in subgraph');
-    }
-
-    if (positionData.pool.id.toLowerCase() !== incentive.poolAddress.toLowerCase()) {
-      throw new BadRequestException('Position is not in the incentive pool');
-    }
+    const currentTime = Math.floor(Date.now() / 1000);
+    const startTime = parseInt(incentive.startTime);
+    const endTime = parseInt(incentive.endTime);
+    const vestingPeriod = parseInt(incentive.vestingPeriod);
 
     const lastClaim = await this.rewardClaimRepository.findOne({
       where: {
@@ -104,10 +97,23 @@ export class IncentiveService {
       order: { claimedAt: 'DESC' },
     });
 
-    const currentTime = Math.floor(Date.now() / 1000);
-    const startTime = parseInt(incentive.startTime);
-    const endTime = parseInt(incentive.endTime);
-    const vestingPeriod = parseInt(incentive.vestingPeriod);
+    // Get combined position and fee data
+    const rewardData = await this.subgraphService.getPositionRewardData(
+      calculateRewardsDto.tokenId.toString(),
+      startTime, // Use incentive start time for fee calculation
+      Math.min(currentTime, endTime) // Use current time or incentive end time
+    );
+
+    const { position: positionData, feeData: feeCollectionData } = rewardData;
+
+    if (!positionData) {
+      throw new NotFoundException('Position not found in subgraph');
+    }
+
+    if (positionData.pool.id.toLowerCase() !== incentive.poolAddress.toLowerCase()) {
+      throw new BadRequestException('Position is not in the incentive pool');
+    }
+
     const positionCreatedAt = parseInt(positionData.transaction.timestamp);
 
     const rewardStartTime = lastClaim && lastClaim.claimedAt ?
@@ -116,50 +122,19 @@ export class IncentiveService {
 
     const rewardEndTime = Math.min(currentTime, endTime);
 
-    // const positionWasInRange = await this.subgraphService.checkPositionInRangeDuringPeriod(
-    //   calculateRewardsDto.tokenId.toString(),
-    //   incentive.poolAddress.toLowerCase(),
-    //   rewardStartTime,
-    //   rewardEndTime
-    // );
-
-    // if (!positionWasInRange) {
-    //   return {
-    //     reward: '0',
-    //     maxReward: '0',
-    //   };
-    // }
-
-    // Get fee collection data for the position during the reward period
-    const feeCollectionData = await this.subgraphService.getPositionFeeCollectionData(
-      calculateRewardsDto.tokenId.toString(),
+    console.log('Reward calculation data:', {
+      positionId: positionData.id,
       rewardStartTime,
-      rewardEndTime
-    );
-    console.log('feeCollectionData', feeCollectionData)
+      rewardEndTime,
+      feeCollectionData
+    });
 
-    // If no accrued fees data is available, estimate from swaps
+    // Calculate total accrued fees
     let totalFeesAccrued = BigInt(feeCollectionData.totalAccruedFeesToken0) +
       BigInt(feeCollectionData.totalAccruedFeesToken1);
 
     if (totalFeesAccrued === BigInt(0)) {
-      console.log('No direct fee data');
-      // const feeEstimate = await this.subgraphService.getPositionFeeEstimateFromSwaps(
-      //   calculateRewardsDto.tokenId.toString(),
-      //   incentive.poolAddress.toLowerCase(),
-      //   rewardStartTime,
-      //   rewardEndTime
-      // );
-
-      // totalFeesAccrued = BigInt(feeEstimate.estimatedFeesToken0) +
-      //   BigInt(feeEstimate.estimatedFeesToken1);
-
-      // console.log('Fee estimate from swaps:', {
-      //   estimatedFeesToken0: feeEstimate.estimatedFeesToken0,
-      //   estimatedFeesToken1: feeEstimate.estimatedFeesToken1,
-      //   swapCount: feeEstimate.swapCount,
-      //   totalEstimated: totalFeesAccrued.toString()
-      // });
+      console.log('No accrued fees found for position');
     }
 
     const timeInRange = Math.max(0, rewardEndTime - rewardStartTime);
@@ -174,41 +149,46 @@ export class IncentiveService {
       };
     }
 
+    // Time-weighted calculation mimicking RewardMath.sol
+    // For unstaked positions, we estimate secondsPerLiquidityInside based on position active time
+
+    const positionActiveEndTime = Math.min(currentTime, endTime);
+    const positionActiveTime = Math.max(0, positionActiveEndTime - rewardStartTime);
+
+    // Pro-rata reward calculation based on liquidity share
+    // This properly accounts for all other participants in the incentive
     const totalPoolLiquidity = BigInt(positionData.pool.liquidity || '1');
 
-    // Base position reward proportional to liquidity
+    // Base reward proportional to liquidity share of the pool
     const basePositionMaxReward = (totalIncentiveReward * positionLiquidity) / totalPoolLiquidity;
 
-    // Calculate fee collection multiplier
-    // This rewards positions that generate more trading fees
-    // Fee multiplier ranges from 1.0 (no fees) to 2.0 (high fees)
-    // The multiplier is based on accrued/estimated fees relative to position liquidity
-    let feeMultiplier = BigInt(1000); // Base multiplier * 1000 for precision
+    // Apply time-weighting factor for positions that joined after incentive start
+    // or to account for time since last claim
+    const totalIncentiveTime = endTime - startTime;
+    const timeParticipationRatio = totalIncentiveTime > 0 ?
+      Math.min(1.0, positionActiveTime / totalIncentiveTime) : 1.0;
 
-    if (totalFeesAccrued > BigInt(0) && positionLiquidity > BigInt(0)) {
-      // Calculate fees as percentage of liquidity (in basis points)
-      const feeRatio = (totalFeesAccrued * BigInt(10000)) / positionLiquidity;
+    // Time-weighted base reward
+    const timeWeightedMaxReward = BigInt(Math.floor(Number(basePositionMaxReward) * timeParticipationRatio));
 
-      // Multiplier increases with fee ratio, capped at 2.0x
-      // Formula: 1.0 + min(feeRatio / 1000, 1.0)
-      const bonusMultiplier = feeRatio > BigInt(1000) ? BigInt(1000) : feeRatio;
-      feeMultiplier = BigInt(1000) + bonusMultiplier; // 1000-2000 range
-    }
-
-    console.log('Fee multiplier calculation:', {
-      totalFeesAccrued: totalFeesAccrued.toString(),
+    console.log('Pro-rata liquidity-based calculation:', {
+      totalIncentiveReward: totalIncentiveReward.toString(),
       positionLiquidity: positionLiquidity.toString(),
-      feeMultiplier: feeMultiplier.toString()
+      totalPoolLiquidity: totalPoolLiquidity.toString(),
+      positionActiveTime,
+      totalIncentiveTime,
+      timeParticipationRatio: (timeParticipationRatio * 100).toFixed(2) + '%',
+      liquidityShareBasisPoints: ((Number(positionLiquidity) / Number(totalPoolLiquidity)) * 10000).toFixed(4),
+      basePositionMaxReward: basePositionMaxReward.toString(),
+      timeWeightedMaxReward: timeWeightedMaxReward.toString(),
     });
 
-    // Apply fee multiplier to max reward
-    const positionMaxReward = (basePositionMaxReward * feeMultiplier) / BigInt(1000);
 
     let earnedReward: bigint;
     if (timeInRange >= vestingPeriod) {
-      earnedReward = positionMaxReward;
+      earnedReward = timeWeightedMaxReward;
     } else if (timeInRange > 0) {
-      earnedReward = (positionMaxReward * BigInt(timeInRange)) / BigInt(vestingPeriod);
+      earnedReward = (timeWeightedMaxReward * BigInt(timeInRange)) / BigInt(vestingPeriod);
     } else {
       earnedReward = BigInt(0);
     }
@@ -220,13 +200,13 @@ export class IncentiveService {
 
     return {
       reward: earnedReward.toString(),
-      maxReward: positionMaxReward.toString(),
+      maxReward: timeWeightedMaxReward.toString(),
       feeData: {
         totalAccruedFeesToken0: feeCollectionData.totalAccruedFeesToken0,
         totalAccruedFeesToken1: feeCollectionData.totalAccruedFeesToken1,
         totalCollectedFeesToken0: feeCollectionData.totalCollectedFeesToken0,
         totalCollectedFeesToken1: feeCollectionData.totalCollectedFeesToken1,
-        feeMultiplier: (feeMultiplier / BigInt(10)).toString(), // Convert back to decimal (divide by 10 for 1 decimal place)
+        feeMultiplier: '1000 (no bonus applied)',
       },
     };
   }

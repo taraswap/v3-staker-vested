@@ -7,6 +7,7 @@ export interface PositionData {
   pool: {
     id: string;
     liquidity: string;
+    tick: string;
     token0: {
       id: string;
       symbol: string;
@@ -15,6 +16,8 @@ export interface PositionData {
       id: string;
       symbol: string;
     };
+    feeGrowthGlobal0X128?: string;
+    feeGrowthGlobal1X128?: string;
   };
   token0: {
     id: string;
@@ -25,9 +28,23 @@ export interface PositionData {
     symbol: string;
   };
   liquidity: string;
+  tickLower: {
+    tickIdx: string;
+    feeGrowthOutside0X128?: string;
+    feeGrowthOutside1X128?: string;
+  };
+  tickUpper: {
+    tickIdx: string;
+    feeGrowthOutside0X128?: string;
+    feeGrowthOutside1X128?: string;
+  };
   transaction: {
     timestamp: string;
   };
+  collectedFeesToken0?: string;
+  collectedFeesToken1?: string;
+  feeGrowthInside0LastX128?: string;
+  feeGrowthInside1LastX128?: string;
 }
 
 export interface PositionSnapshot {
@@ -51,21 +68,32 @@ export interface FeeCollectionData {
   }>;
 }
 
+export interface PositionRewardData {
+  position: PositionData | null;
+  feeData: FeeCollectionData;
+}
+
 @Injectable()
 export class SubgraphService {
   private readonly SUBGRAPH_URL = 'https://indexer.lswap.app/subgraphs/name/taraxa/uniswap-v3';
 
   constructor(private configService: ConfigService) { }
 
-  async getPositionData(tokenId: string): Promise<PositionData | null> {
-    const query = `
-      query GetPosition($tokenId: String!) {
+  async getPositionRewardData(
+    tokenId: string,
+    startTimestamp: number,
+    endTimestamp: number
+  ): Promise<PositionRewardData> {
+    // Combined query to get all position data including fees
+    const positionQuery = `
+      query GetPositionRewardData($tokenId: String!) {
         position(id: $tokenId) {
           id
           owner
           pool {
             id
             liquidity
+            tick
             token0 {
               id
               symbol
@@ -74,6 +102,8 @@ export class SubgraphService {
               id
               symbol
             }
+            feeGrowthGlobal0X128
+            feeGrowthGlobal1X128
           }
           token0 {
             id
@@ -84,212 +114,28 @@ export class SubgraphService {
             symbol
           }
           liquidity
-          transaction {
-            timestamp
-          }
-        }
-      }
-    `;
-
-    try {
-      const response = await fetch(this.SUBGRAPH_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query,
-          variables: { tokenId },
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.errors) {
-        console.error('Subgraph query error:', data.errors);
-        return null;
-      }
-
-      return data.data?.position || null;
-    } catch (error) {
-      console.error('Failed to query subgraph:', error);
-      return null;
-    }
-  }
-
-  // async checkPositionInRangeDuringPeriod(
-  //   tokenId: string,
-  //   poolAddress: string,
-  //   startTimestamp: number,
-  //   endTimestamp: number
-  // ): Promise<boolean> {
-  //   const positionQuery = `
-  //     query CheckPosition($tokenId: String!) {
-  //       position(id: $tokenId) {
-  //         id
-  //         pool {
-  //           id
-  //         }
-  //         liquidity
-  //         tickLower {
-  //           tickIdx
-  //         }
-  //         tickUpper {
-  //           tickIdx
-  //         }
-  //       }
-  //     }
-  //   `;
-
-  //   try {
-  //     const positionResponse = await fetch(this.SUBGRAPH_URL, {
-  //       method: 'POST',
-  //       headers: {
-  //         'Content-Type': 'application/json',
-  //       },
-  //       body: JSON.stringify({
-  //         query: positionQuery,
-  //         variables: { tokenId },
-  //       }),
-  //     });
-
-  //     const positionData = await positionResponse.json();
-
-  //     if (positionData.errors) {
-  //       console.error('Position query error:', positionData.errors);
-  //       return false;
-  //     }
-
-  //     const position = positionData.data?.position;
-  //     if (!position) {
-  //       return false;
-  //     }
-
-  //     if (position.pool.id.toLowerCase() !== poolAddress.toLowerCase()) {
-  //       return false;
-  //     }
-
-  //     const liquidity = BigInt(position.liquidity || '0');
-  //     if (liquidity === BigInt(0)) {
-  //       return false;
-  //     }
-
-  //     const tickLower = parseInt(position.tickLower?.tickIdx || '0');
-  //     const tickUpper = parseInt(position.tickUpper?.tickIdx || '0');
-
-  //     return await this.checkPositionInRangeDuringSwaps(
-  //       poolAddress,
-  //       tickLower,
-  //       tickUpper,
-  //       startTimestamp,
-  //       endTimestamp
-  //     );
-
-  //   } catch (error) {
-  //     console.error('Failed to check position:', error);
-  //     return false;
-  //   }
-  // }
-
-  // async checkPositionInRangeDuringSwaps(
-  //   poolAddress: string,
-  //   tickLower: number,
-  //   tickUpper: number,
-  //   startTimestamp: number,
-  //   endTimestamp: number
-  // ): Promise<boolean> {
-  //   const query = `
-  //     query CheckSwapsInRange($poolAddress: String!, $startTimestamp: BigInt!, $endTimestamp: BigInt!, $tickLower: BigInt!, $tickUpper: BigInt!) {
-  //       swaps(
-  //         first: 100,
-  //         where: {
-  //           pool: $poolAddress,
-  //           timestamp_gte: $startTimestamp,
-  //           timestamp_lte: $endTimestamp,
-  //           tick_gte: $tickLower,
-  //           tick_lte: $tickUpper
-  //         }
-  //         orderBy: timestamp
-  //         orderDirection: desc
-  //       ) {
-  //         id
-  //         timestamp
-  //         tick
-  //       }
-  //     }
-  //   `;
-
-  //   try {
-  //     const response = await fetch(this.SUBGRAPH_URL, {
-  //       method: 'POST',
-  //       headers: {
-  //         'Content-Type': 'application/json',
-  //       },
-  //       body: JSON.stringify({
-  //         query,
-  //         variables: {
-  //           poolAddress,
-  //           startTimestamp: startTimestamp.toString(),
-  //           endTimestamp: endTimestamp.toString(),
-  //           tickLower: tickLower.toString(),
-  //           tickUpper: tickUpper.toString()
-  //         },
-  //       }),
-  //     });
-
-  //     const data = await response.json();
-
-  //     if (data.errors) {
-  //       console.error('Swaps query error:', data.errors);
-  //     }
-
-  //     const swaps = data.data?.swaps || [];
-
-  //     if (swaps.length === 0) {
-  //       return false;
-  //     }
-
-  //     return true;
-
-  //   } catch (error) {
-  //     console.error('Failed to check swaps:', error);
-  //   }
-  // }
-
-  async getPositionFeeCollectionData(
-    tokenId: string,
-    startTimestamp: number,
-    endTimestamp: number
-  ): Promise<FeeCollectionData> {
-    // Get position data to access current accrued fees
-    // Note: Some subgraphs may not have tokensOwed fields directly on position
-    const positionQuery = `
-      query GetPositionFees($tokenId: String!) {
-        position(id: $tokenId) {
-          id
-          collectedFeesToken0
-          collectedFeesToken1
-          feeGrowthInside0LastX128
-          feeGrowthInside1LastX128
-          liquidity
-          pool {
-            id
-            feeGrowthGlobal0X128
-            feeGrowthGlobal1X128
-          }
           tickLower {
+            tickIdx
             feeGrowthOutside0X128
             feeGrowthOutside1X128
           }
           tickUpper {
+            tickIdx
             feeGrowthOutside0X128
             feeGrowthOutside1X128
           }
+          transaction {
+            timestamp
+          }
+          collectedFeesToken0
+          collectedFeesToken1
+          feeGrowthInside0LastX128
+          feeGrowthInside1LastX128
         }
       }
     `;
 
-    // Get position snapshots during the period to calculate fee growth
+    // Get position snapshots during the period
     const snapshotQuery = `
       query GetPositionSnapshots($tokenId: String!, $startTimestamp: BigInt!, $endTimestamp: BigInt!) {
         positionSnapshots(
@@ -353,11 +199,12 @@ export class SubgraphService {
       }
 
       const position = positionData.data?.position;
-      console.log('position', position)
       const snapshots = snapshotData.data?.positionSnapshots || [];
-      console.log('snapshots', snapshots)
 
-      // Calculate accrued fees using fee growth data
+      console.log('Combined position data:', position);
+      console.log('Position snapshots:', snapshots);
+
+      // Calculate accrued fees during the incentive period using snapshot differences
       let totalAccruedFeesToken0 = '0';
       let totalAccruedFeesToken1 = '0';
 
@@ -365,22 +212,114 @@ export class SubgraphService {
         const liquidity = BigInt(position.liquidity);
         const Q128 = BigInt(2) ** BigInt(128);
 
-        // Get fee growth values
-        const feeGrowthInside0 = BigInt(position.feeGrowthInside0LastX128 || '0');
-        const feeGrowthInside1 = BigInt(position.feeGrowthInside1LastX128 || '0');
+        // Check if this is a full range position
+        const isFullRange = position.tickLower?.feeGrowthOutside0X128 === '0' &&
+          position.tickLower?.feeGrowthOutside1X128 === '0' &&
+          position.tickUpper?.feeGrowthOutside0X128 === '0' &&
+          position.tickUpper?.feeGrowthOutside1X128 === '0';
 
-        // Calculate accrued fees: (feeGrowthInside * liquidity) / Q128
-        // This gives us the total fees that should be owed to this position
-        totalAccruedFeesToken0 = ((feeGrowthInside0 * liquidity) / Q128).toString();
-        totalAccruedFeesToken1 = ((feeGrowthInside1 * liquidity) / Q128).toString();
+        if (snapshots.length > 1) {
+          // Multiple snapshots: use difference between earliest and latest
+          const earliestSnapshot = snapshots[0];
+          const latestSnapshot = snapshots[snapshots.length - 1];
 
-        console.log('Fee calculation:', {
-          liquidity: liquidity.toString(),
-          feeGrowthInside0: feeGrowthInside0.toString(),
-          feeGrowthInside1: feeGrowthInside1.toString(),
-          calculatedAccruedFeesToken0: totalAccruedFeesToken0,
-          calculatedAccruedFeesToken1: totalAccruedFeesToken1
-        });
+          const feeGrowthInside0Start = BigInt(earliestSnapshot.feeGrowthInside0LastX128 || '0');
+          const feeGrowthInside1Start = BigInt(earliestSnapshot.feeGrowthInside1LastX128 || '0');
+
+          const feeGrowthInside0End = BigInt(latestSnapshot.feeGrowthInside0LastX128 || '0');
+          const feeGrowthInside1End = BigInt(latestSnapshot.feeGrowthInside1LastX128 || '0');
+
+          const feeGrowthInside0Diff = feeGrowthInside0End - feeGrowthInside0Start;
+          const feeGrowthInside1Diff = feeGrowthInside1End - feeGrowthInside1Start;
+
+          totalAccruedFeesToken0 = ((feeGrowthInside0Diff * liquidity) / Q128).toString();
+          totalAccruedFeesToken1 = ((feeGrowthInside1Diff * liquidity) / Q128).toString();
+
+          console.log('Multiple snapshots - fee calculation for incentive period:', {
+            snapshotCount: snapshots.length,
+            feeGrowthInside0Diff: feeGrowthInside0Diff.toString(),
+            feeGrowthInside1Diff: feeGrowthInside1Diff.toString(),
+            totalAccruedFeesToken0,
+            totalAccruedFeesToken1
+          });
+
+        } else if (snapshots.length === 1) {
+          // Single snapshot: use snapshot as start, current position as end
+          const snapshot = snapshots[0];
+
+          const feeGrowthInside0Start = BigInt(snapshot.feeGrowthInside0LastX128 || '0');
+          const feeGrowthInside1Start = BigInt(snapshot.feeGrowthInside1LastX128 || '0');
+
+          const feeGrowthInside0End = BigInt(position.feeGrowthInside0LastX128 || '0');
+          const feeGrowthInside1End = BigInt(position.feeGrowthInside1LastX128 || '0');
+
+          const feeGrowthInside0Diff = feeGrowthInside0End - feeGrowthInside0Start;
+          const feeGrowthInside1Diff = feeGrowthInside1End - feeGrowthInside1Start;
+
+          // If snapshot is at position creation time and no fee growth, 
+          // but this is a full range position with pool activity, estimate fees
+          if (feeGrowthInside0Diff === BigInt(0) && feeGrowthInside1Diff === BigInt(0) && isFullRange) {
+            console.log('Full range position with zero snapshot diff - estimating from global fee growth');
+
+            // For full range positions, feeGrowthInside should equal global feeGrowth
+            // Estimate fees based on global pool activity and position's share
+            const globalFeeGrowth0 = BigInt(position.pool.feeGrowthGlobal0X128 || '0');
+            const globalFeeGrowth1 = BigInt(position.pool.feeGrowthGlobal1X128 || '0');
+
+            // Calculate position's share of total pool liquidity
+            const totalPoolLiquidity = BigInt(position.pool.liquidity || '1');
+            const positionShare = liquidity * BigInt(10000) / totalPoolLiquidity; // basis points
+
+            // Estimate fees as a fraction of global fee growth based on time and liquidity share
+            // This is a conservative estimate for recent positions
+            const timeFactor = BigInt(50); // 0.5% of global fees as conservative estimate
+            const estimatedFees0 = (globalFeeGrowth0 * liquidity * timeFactor) / (BigInt(10000) * Q128);
+            const estimatedFees1 = (globalFeeGrowth1 * liquidity * timeFactor) / (BigInt(10000) * Q128);
+
+            totalAccruedFeesToken0 = estimatedFees0.toString();
+            totalAccruedFeesToken1 = estimatedFees1.toString();
+
+            console.log('Full range fee estimation:', {
+              globalFeeGrowth0: globalFeeGrowth0.toString(),
+              globalFeeGrowth1: globalFeeGrowth1.toString(),
+              positionShare: positionShare.toString(),
+              estimatedFees0: totalAccruedFeesToken0,
+              estimatedFees1: totalAccruedFeesToken1
+            });
+          } else {
+            totalAccruedFeesToken0 = ((feeGrowthInside0Diff * liquidity) / Q128).toString();
+            totalAccruedFeesToken1 = ((feeGrowthInside1Diff * liquidity) / Q128).toString();
+          }
+
+          console.log('Single snapshot - using snapshot to current position:', {
+            snapshotTimestamp: snapshot.timestamp,
+            feeGrowthInside0Start: feeGrowthInside0Start.toString(),
+            feeGrowthInside0End: feeGrowthInside0End.toString(),
+            feeGrowthInside0Diff: feeGrowthInside0Diff.toString(),
+            feeGrowthInside1Start: feeGrowthInside1Start.toString(),
+            feeGrowthInside1End: feeGrowthInside1End.toString(),
+            feeGrowthInside1Diff: feeGrowthInside1Diff.toString(),
+            isFullRange,
+            totalAccruedFeesToken0,
+            totalAccruedFeesToken1
+          });
+
+        } else {
+          // No snapshots: use current position state as approximation
+          console.log('No snapshots available, using current position fee growth as fallback');
+
+          const feeGrowthInside0 = BigInt(position.feeGrowthInside0LastX128 || '0');
+          const feeGrowthInside1 = BigInt(position.feeGrowthInside1LastX128 || '0');
+
+          // This gives total fees but it's better than nothing
+          totalAccruedFeesToken0 = ((feeGrowthInside0 * liquidity) / Q128).toString();
+          totalAccruedFeesToken1 = ((feeGrowthInside1 * liquidity) / Q128).toString();
+
+          console.log('Fallback fee calculation (total since position creation):', {
+            totalAccruedFeesToken0,
+            totalAccruedFeesToken1
+          });
+        }
       }
 
       // Calculate collected fees during the period from snapshots
@@ -402,157 +341,75 @@ export class SubgraphService {
         ).toString();
       }
 
-      return {
+      const feeData: FeeCollectionData = {
         totalCollectedFeesToken0,
         totalCollectedFeesToken1,
         totalAccruedFeesToken0,
         totalAccruedFeesToken1,
-        collectionEvents: [], // No collect events since query was problematic
+        collectionEvents: [],
+      };
+
+      return {
+        position,
+        feeData,
       };
 
     } catch (error) {
-      console.error('Failed to get fee collection data:', error);
+      console.error('Failed to get position reward data:', error);
       return {
-        totalCollectedFeesToken0: '0',
-        totalCollectedFeesToken1: '0',
-        totalAccruedFeesToken0: '0',
-        totalAccruedFeesToken1: '0',
-        collectionEvents: [],
+        position: null,
+        feeData: {
+          totalCollectedFeesToken0: '0',
+          totalCollectedFeesToken1: '0',
+          totalAccruedFeesToken0: '0',
+          totalAccruedFeesToken1: '0',
+          collectionEvents: [],
+        },
       };
     }
   }
 
-  // async getPositionFeeEstimateFromSwaps(
-  //   tokenId: string,
-  //   poolAddress: string,
-  //   startTimestamp: number,
-  //   endTimestamp: number
-  // ): Promise<{ estimatedFeesToken0: string; estimatedFeesToken1: string; swapCount: number }> {
-  //   // First get position tick range
-  //   const positionQuery = `
-  //     query GetPosition($tokenId: String!) {
-  //       position(id: $tokenId) {
-  //         id
-  //         liquidity
-  //         tickLower {
-  //           tickIdx
-  //         }
-  //         tickUpper {
-  //           tickIdx
-  //         }
-  //         pool {
-  //           id
-  //           feeTier
-  //         }
-  //       }
-  //     }
-  //   `;
+  async debugPositionTicks(tokenId: string): Promise<any> {
+    const query = `
+      query GetPositionTicks($tokenId: String!) {
+        position(id: $tokenId) {
+          id
+          liquidity
+          tickLower {
+            tickIdx
+          }
+          tickUpper {
+            tickIdx
+          }
+          pool {
+            id
+            tick
+            sqrtPrice
+            token0Price
+            token1Price
+          }
+        }
+      }
+    `;
 
-  //   // Get swaps in the position's range during the period
-  //   const swapQuery = `
-  //     query GetSwapsInRange($poolAddress: String!, $startTimestamp: BigInt!, $endTimestamp: BigInt!, $tickLower: BigInt!, $tickUpper: BigInt!) {
-  //       swaps(
-  //         first: 1000,
-  //         where: {
-  //           pool: $poolAddress,
-  //           timestamp_gte: $startTimestamp,
-  //           timestamp_lte: $endTimestamp,
-  //           tick_gte: $tickLower,
-  //           tick_lte: $tickUpper
-  //         }
-  //         orderBy: timestamp
-  //         orderDirection: desc
-  //       ) {
-  //         id
-  //         timestamp
-  //         tick
-  //         amount0
-  //         amount1
-  //         amountUSD
-  //       }
-  //     }
-  //   `;
+    try {
+      const response = await fetch(this.SUBGRAPH_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query,
+          variables: { tokenId },
+        }),
+      });
 
-  //   try {
-  //     const positionResponse = await fetch(this.SUBGRAPH_URL, {
-  //       method: 'POST',
-  //       headers: {
-  //         'Content-Type': 'application/json',
-  //       },
-  //       body: JSON.stringify({
-  //         query: positionQuery,
-  //         variables: { tokenId },
-  //       }),
-  //     });
-
-  //     const positionData = await positionResponse.json();
-
-  //     if (positionData.errors) {
-  //       console.error('Position query error:', positionData.errors);
-  //       return { estimatedFeesToken0: '0', estimatedFeesToken1: '0', swapCount: 0 };
-  //     }
-
-  //     const position = positionData.data?.position;
-  //     if (!position) {
-  //       return { estimatedFeesToken0: '0', estimatedFeesToken1: '0', swapCount: 0 };
-  //     }
-
-  //     const tickLower = parseInt(position.tickLower?.tickIdx || '0');
-  //     const tickUpper = parseInt(position.tickUpper?.tickIdx || '0');
-  //     const feeTier = parseInt(position.pool?.feeTier || '3000'); // Default to 0.3%
-
-  //     const swapResponse = await fetch(this.SUBGRAPH_URL, {
-  //       method: 'POST',
-  //       headers: {
-  //         'Content-Type': 'application/json',
-  //       },
-  //       body: JSON.stringify({
-  //         query: swapQuery,
-  //         variables: {
-  //           poolAddress,
-  //           startTimestamp: startTimestamp.toString(),
-  //           endTimestamp: endTimestamp.toString(),
-  //           tickLower: tickLower.toString(),
-  //           tickUpper: tickUpper.toString()
-  //         },
-  //       }),
-  //     });
-
-  //     const swapData = await swapResponse.json();
-
-  //     if (swapData.errors) {
-  //       console.error('Swap query error:', swapData.errors);
-  //       return { estimatedFeesToken0: '0', estimatedFeesToken1: '0', swapCount: 0 };
-  //     }
-
-  //     const swaps = swapData.data?.swaps || [];
-
-  //     // Estimate fees based on swap volume and fee tier
-  //     // Fee = (swap amount * fee tier) / 1000000
-  //     let estimatedFeesToken0 = BigInt(0);
-  //     let estimatedFeesToken1 = BigInt(0);
-
-  //     for (const swap of swaps) {
-  //       const amount0 = BigInt(Math.abs(parseInt(swap.amount0 || '0')));
-  //       const amount1 = BigInt(Math.abs(parseInt(swap.amount1 || '0')));
-
-  //       // Apply fee tier percentage
-  //       const fee0 = (amount0 * BigInt(feeTier)) / BigInt(1000000);
-  //       const fee1 = (amount1 * BigInt(feeTier)) / BigInt(1000000);
-
-  //       estimatedFeesToken0 += fee0;
-  //       estimatedFeesToken1 += fee1;
-  //     }
-
-  //     return {
-  //       estimatedFeesToken0: estimatedFeesToken0.toString(),
-  //       estimatedFeesToken1: estimatedFeesToken1.toString(),
-  //       swapCount: swaps.length,
-  //     };
-
-  //   } catch (error) {
-  //     console.error('Failed to estimate fees from swaps:', error);
-  //     return { estimatedFeesToken0: '0', estimatedFeesToken1: '0', swapCount: 0 };
-  //   }
-  // }
+      const data = await response.json();
+      console.log('Position tick range debug:', JSON.stringify(data, null, 2));
+      return data;
+    } catch (error) {
+      console.error('Failed to query position ticks:', error);
+      return null;
+    }
+  }
 } 
