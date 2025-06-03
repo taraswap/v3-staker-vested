@@ -79,6 +79,54 @@ export class SubgraphService {
 
   constructor(private configService: ConfigService) { }
 
+  /**
+   * Calculate current feeGrowthInside using Uniswap V3 formula
+   * feeGrowthInside = feeGrowthGlobal - feeGrowthBelow - feeGrowthAbove
+   */
+  private calculateCurrentFeeGrowthInside(
+    position: PositionData
+  ): { feeGrowthInside0X128: bigint; feeGrowthInside1X128: bigint } {
+    const currentTick = parseInt(position.pool.tick);
+    const tickLower = parseInt(position.tickLower.tickIdx);
+    const tickUpper = parseInt(position.tickUpper.tickIdx);
+
+    const feeGrowthGlobal0X128 = BigInt(position.pool.feeGrowthGlobal0X128 || '0');
+    const feeGrowthGlobal1X128 = BigInt(position.pool.feeGrowthGlobal1X128 || '0');
+
+    const feeGrowthOutside0Lower = BigInt(position.tickLower.feeGrowthOutside0X128 || '0');
+    const feeGrowthOutside1Lower = BigInt(position.tickLower.feeGrowthOutside1X128 || '0');
+    const feeGrowthOutside0Upper = BigInt(position.tickUpper.feeGrowthOutside0X128 || '0');
+    const feeGrowthOutside1Upper = BigInt(position.tickUpper.feeGrowthOutside1X128 || '0');
+
+    // Calculate feeGrowthBelow
+    let feeGrowthBelow0X128: bigint;
+    let feeGrowthBelow1X128: bigint;
+    if (currentTick >= tickLower) {
+      feeGrowthBelow0X128 = feeGrowthOutside0Lower;
+      feeGrowthBelow1X128 = feeGrowthOutside1Lower;
+    } else {
+      feeGrowthBelow0X128 = feeGrowthGlobal0X128 - feeGrowthOutside0Lower;
+      feeGrowthBelow1X128 = feeGrowthGlobal1X128 - feeGrowthOutside1Lower;
+    }
+
+    // Calculate feeGrowthAbove
+    let feeGrowthAbove0X128: bigint;
+    let feeGrowthAbove1X128: bigint;
+    if (currentTick < tickUpper) {
+      feeGrowthAbove0X128 = feeGrowthOutside0Upper;
+      feeGrowthAbove1X128 = feeGrowthOutside1Upper;
+    } else {
+      feeGrowthAbove0X128 = feeGrowthGlobal0X128 - feeGrowthOutside0Upper;
+      feeGrowthAbove1X128 = feeGrowthGlobal1X128 - feeGrowthOutside1Upper;
+    }
+
+    // Calculate feeGrowthInside
+    const feeGrowthInside0X128 = feeGrowthGlobal0X128 - feeGrowthBelow0X128 - feeGrowthAbove0X128;
+    const feeGrowthInside1X128 = feeGrowthGlobal1X128 - feeGrowthBelow1X128 - feeGrowthAbove1X128;
+
+    return { feeGrowthInside0X128, feeGrowthInside1X128 };
+  }
+
   async getPositionRewardData(
     tokenId: string,
     startTimestamp: number,
@@ -204,7 +252,7 @@ export class SubgraphService {
       console.log('Combined position data:', position);
       console.log('Position snapshots:', snapshots);
 
-      // Calculate accrued fees during the incentive period using snapshot differences
+      // Calculate accrued fees using CURRENT feeGrowthInside values
       let totalAccruedFeesToken0 = '0';
       let totalAccruedFeesToken1 = '0';
 
@@ -212,134 +260,26 @@ export class SubgraphService {
         const liquidity = BigInt(position.liquidity);
         const Q128 = BigInt(2) ** BigInt(128);
 
-        // Check if this is a full range position
-        const isFullRange = position.tickLower?.feeGrowthOutside0X128 === '0' &&
-          position.tickLower?.feeGrowthOutside1X128 === '0' &&
-          position.tickUpper?.feeGrowthOutside0X128 === '0' &&
-          position.tickUpper?.feeGrowthOutside1X128 === '0';
+        // Calculate current feeGrowthInside using Uniswap V3 formula
+        const { feeGrowthInside0X128: currentFeeGrowthInside0, feeGrowthInside1X128: currentFeeGrowthInside1 } =
+          this.calculateCurrentFeeGrowthInside(position);
 
-        if (snapshots.length > 1) {
-          // Multiple snapshots: use difference between earliest and latest
-          const earliestSnapshot = snapshots[0];
-          const latestSnapshot = snapshots[snapshots.length - 1];
+        // Get the baseline feeGrowthInside values (when fees were last collected)
+        const feeGrowthInside0Last = BigInt(position.feeGrowthInside0LastX128 || '0');
+        const feeGrowthInside1Last = BigInt(position.feeGrowthInside1LastX128 || '0');
 
-          const feeGrowthInside0Start = BigInt(earliestSnapshot.feeGrowthInside0LastX128 || '0');
-          const feeGrowthInside1Start = BigInt(earliestSnapshot.feeGrowthInside1LastX128 || '0');
+        // Calculate the difference to get accrued fees since last collection
+        const feeGrowthInside0Diff = currentFeeGrowthInside0 - feeGrowthInside0Last;
+        const feeGrowthInside1Diff = currentFeeGrowthInside1 - feeGrowthInside1Last;
 
-          const feeGrowthInside0End = BigInt(latestSnapshot.feeGrowthInside0LastX128 || '0');
-          const feeGrowthInside1End = BigInt(latestSnapshot.feeGrowthInside1LastX128 || '0');
-
-          const feeGrowthInside0Diff = feeGrowthInside0End - feeGrowthInside0Start;
-          const feeGrowthInside1Diff = feeGrowthInside1End - feeGrowthInside1Start;
-
-          totalAccruedFeesToken0 = ((feeGrowthInside0Diff * liquidity) / Q128).toString();
-          totalAccruedFeesToken1 = ((feeGrowthInside1Diff * liquidity) / Q128).toString();
-
-          console.log('Multiple snapshots - fee calculation for incentive period:', {
-            snapshotCount: snapshots.length,
-            feeGrowthInside0Diff: feeGrowthInside0Diff.toString(),
-            feeGrowthInside1Diff: feeGrowthInside1Diff.toString(),
-            totalAccruedFeesToken0,
-            totalAccruedFeesToken1
-          });
-
-        } else if (snapshots.length === 1) {
-          // Single snapshot: use snapshot as start, current position as end
-          const snapshot = snapshots[0];
-
-          const feeGrowthInside0Start = BigInt(snapshot.feeGrowthInside0LastX128 || '0');
-          const feeGrowthInside1Start = BigInt(snapshot.feeGrowthInside1LastX128 || '0');
-
-          const feeGrowthInside0End = BigInt(position.feeGrowthInside0LastX128 || '0');
-          const feeGrowthInside1End = BigInt(position.feeGrowthInside1LastX128 || '0');
-
-          const feeGrowthInside0Diff = feeGrowthInside0End - feeGrowthInside0Start;
-          const feeGrowthInside1Diff = feeGrowthInside1End - feeGrowthInside1Start;
-
-          // If snapshot is at position creation time and no fee growth, 
-          // but this is a full range position with pool activity, estimate fees
-          if (feeGrowthInside0Diff === BigInt(0) && feeGrowthInside1Diff === BigInt(0) && isFullRange) {
-            console.log('Full range position with zero snapshot diff - estimating from global fee growth');
-
-            // For full range positions, feeGrowthInside should equal global feeGrowth
-            // Estimate fees based on global pool activity and position's share
-            const globalFeeGrowth0 = BigInt(position.pool.feeGrowthGlobal0X128 || '0');
-            const globalFeeGrowth1 = BigInt(position.pool.feeGrowthGlobal1X128 || '0');
-
-            // Calculate position's share of total pool liquidity
-            const totalPoolLiquidity = BigInt(position.pool.liquidity || '1');
-            const positionShare = liquidity * BigInt(10000) / totalPoolLiquidity; // basis points
-
-            // Estimate fees as a fraction of global fee growth based on time and liquidity share
-            // This is a conservative estimate for recent positions
-            const timeFactor = BigInt(50); // 0.5% of global fees as conservative estimate
-            const estimatedFees0 = (globalFeeGrowth0 * liquidity * timeFactor) / (BigInt(10000) * Q128);
-            const estimatedFees1 = (globalFeeGrowth1 * liquidity * timeFactor) / (BigInt(10000) * Q128);
-
-            totalAccruedFeesToken0 = estimatedFees0.toString();
-            totalAccruedFeesToken1 = estimatedFees1.toString();
-
-            console.log('Full range fee estimation:', {
-              globalFeeGrowth0: globalFeeGrowth0.toString(),
-              globalFeeGrowth1: globalFeeGrowth1.toString(),
-              positionShare: positionShare.toString(),
-              estimatedFees0: totalAccruedFeesToken0,
-              estimatedFees1: totalAccruedFeesToken1
-            });
-          } else {
-            totalAccruedFeesToken0 = ((feeGrowthInside0Diff * liquidity) / Q128).toString();
-            totalAccruedFeesToken1 = ((feeGrowthInside1Diff * liquidity) / Q128).toString();
-          }
-
-          console.log('Single snapshot - using snapshot to current position:', {
-            snapshotTimestamp: snapshot.timestamp,
-            feeGrowthInside0Start: feeGrowthInside0Start.toString(),
-            feeGrowthInside0End: feeGrowthInside0End.toString(),
-            feeGrowthInside0Diff: feeGrowthInside0Diff.toString(),
-            feeGrowthInside1Start: feeGrowthInside1Start.toString(),
-            feeGrowthInside1End: feeGrowthInside1End.toString(),
-            feeGrowthInside1Diff: feeGrowthInside1Diff.toString(),
-            isFullRange,
-            totalAccruedFeesToken0,
-            totalAccruedFeesToken1
-          });
-
-        } else {
-          // No snapshots: use current position state as approximation
-          console.log('No snapshots available, using current position fee growth as fallback');
-
-          const feeGrowthInside0 = BigInt(position.feeGrowthInside0LastX128 || '0');
-          const feeGrowthInside1 = BigInt(position.feeGrowthInside1LastX128 || '0');
-
-          // This gives total fees but it's better than nothing
-          totalAccruedFeesToken0 = ((feeGrowthInside0 * liquidity) / Q128).toString();
-          totalAccruedFeesToken1 = ((feeGrowthInside1 * liquidity) / Q128).toString();
-
-          console.log('Fallback fee calculation (total since position creation):', {
-            totalAccruedFeesToken0,
-            totalAccruedFeesToken1
-          });
-        }
+        // Calculate accrued fees using the standard Uniswap V3 formula
+        totalAccruedFeesToken0 = ((feeGrowthInside0Diff * liquidity) / Q128).toString();
+        totalAccruedFeesToken1 = ((feeGrowthInside1Diff * liquidity) / Q128).toString();
       }
 
       // Calculate collected fees during the period from snapshots
       let totalCollectedFeesToken0 = '0';
       let totalCollectedFeesToken1 = '0';
-
-      if (snapshots.length > 0) {
-        const latestSnapshot = snapshots[snapshots.length - 1];
-        const earliestSnapshot = snapshots[0];
-
-        totalCollectedFeesToken0 = (
-          BigInt(latestSnapshot.collectedFeesToken0 || '0') -
-          BigInt(earliestSnapshot.collectedFeesToken0 || '0')
-        ).toString();
-
-        totalCollectedFeesToken1 = (
-          BigInt(latestSnapshot.collectedFeesToken1 || '0') -
-          BigInt(earliestSnapshot.collectedFeesToken1 || '0')
-        ).toString();
-      }
 
       const feeData: FeeCollectionData = {
         totalCollectedFeesToken0,
@@ -366,50 +306,6 @@ export class SubgraphService {
           collectionEvents: [],
         },
       };
-    }
-  }
-
-  async debugPositionTicks(tokenId: string): Promise<any> {
-    const query = `
-      query GetPositionTicks($tokenId: String!) {
-        position(id: $tokenId) {
-          id
-          liquidity
-          tickLower {
-            tickIdx
-          }
-          tickUpper {
-            tickIdx
-          }
-          pool {
-            id
-            tick
-            sqrtPrice
-            token0Price
-            token1Price
-          }
-        }
-      }
-    `;
-
-    try {
-      const response = await fetch(this.SUBGRAPH_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query,
-          variables: { tokenId },
-        }),
-      });
-
-      const data = await response.json();
-      console.log('Position tick range debug:', JSON.stringify(data, null, 2));
-      return data;
-    } catch (error) {
-      console.error('Failed to query position ticks:', error);
-      return null;
     }
   }
 } 

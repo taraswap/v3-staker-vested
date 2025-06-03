@@ -130,11 +130,15 @@ export class IncentiveService {
     });
 
     // Calculate total accrued fees
-    let totalFeesAccrued = BigInt(feeCollectionData.totalAccruedFeesToken0) +
+    const totalFeesAccrued = BigInt(feeCollectionData.totalAccruedFeesToken0) +
       BigInt(feeCollectionData.totalAccruedFeesToken1);
 
     if (totalFeesAccrued === BigInt(0)) {
       console.log('No accrued fees found for position');
+      return {
+        reward: '0',
+        maxReward: '0',
+      };
     }
 
     const timeInRange = Math.max(0, rewardEndTime - rewardStartTime);
@@ -151,7 +155,6 @@ export class IncentiveService {
 
     // Time-weighted calculation mimicking RewardMath.sol
     // For unstaked positions, we estimate secondsPerLiquidityInside based on position active time
-
     const positionActiveEndTime = Math.min(currentTime, endTime);
     const positionActiveTime = Math.max(0, positionActiveEndTime - rewardStartTime);
 
@@ -171,19 +174,6 @@ export class IncentiveService {
     // Time-weighted base reward
     const timeWeightedMaxReward = BigInt(Math.floor(Number(basePositionMaxReward) * timeParticipationRatio));
 
-    console.log('Pro-rata liquidity-based calculation:', {
-      totalIncentiveReward: totalIncentiveReward.toString(),
-      positionLiquidity: positionLiquidity.toString(),
-      totalPoolLiquidity: totalPoolLiquidity.toString(),
-      positionActiveTime,
-      totalIncentiveTime,
-      timeParticipationRatio: (timeParticipationRatio * 100).toFixed(2) + '%',
-      liquidityShareBasisPoints: ((Number(positionLiquidity) / Number(totalPoolLiquidity)) * 10000).toFixed(4),
-      basePositionMaxReward: basePositionMaxReward.toString(),
-      timeWeightedMaxReward: timeWeightedMaxReward.toString(),
-    });
-
-
     let earnedReward: bigint;
     if (timeInRange >= vestingPeriod) {
       earnedReward = timeWeightedMaxReward;
@@ -193,21 +183,9 @@ export class IncentiveService {
       earnedReward = BigInt(0);
     }
 
-    if (lastClaim) {
-      const previouslyClaimed = BigInt(lastClaim.amount || '0');
-      earnedReward = earnedReward > previouslyClaimed ? earnedReward - previouslyClaimed : BigInt(0);
-    }
-
     return {
       reward: earnedReward.toString(),
       maxReward: timeWeightedMaxReward.toString(),
-      feeData: {
-        totalAccruedFeesToken0: feeCollectionData.totalAccruedFeesToken0,
-        totalAccruedFeesToken1: feeCollectionData.totalAccruedFeesToken1,
-        totalCollectedFeesToken0: feeCollectionData.totalCollectedFeesToken0,
-        totalCollectedFeesToken1: feeCollectionData.totalCollectedFeesToken1,
-        feeMultiplier: '1000 (no bonus applied)',
-      },
     };
   }
 
