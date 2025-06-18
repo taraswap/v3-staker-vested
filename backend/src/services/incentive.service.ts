@@ -35,6 +35,7 @@ export class IncentiveService {
   async createIncentive(
     createIncentiveDto: CreateIncentiveDto,
   ): Promise<Incentive> {
+
     const incentive = new Incentive();
     incentive.rewardToken = createIncentiveDto.rewardToken;
     if (incentive.rewardToken.toLowerCase() !== this.TSWAP_TOKEN_ADDRESS.toLowerCase()) {
@@ -44,9 +45,9 @@ export class IncentiveService {
     incentive.startTime = createIncentiveDto.startTime.toString();
     incentive.endTime = createIncentiveDto.endTime.toString();
     incentive.vestingPeriod = createIncentiveDto.vestingPeriod.toString();
-    incentive.totalRewardUnclaimed =
-      createIncentiveDto.totalRewardUnclaimed.toString();
+    incentive.totalRewardUnclaimed = (createIncentiveDto.totalRewardUnclaimed * Math.pow(10, 18)).toString();
     incentive.totalRewardClaimed = '0';
+    incentive.refundeeAddress = createIncentiveDto.refundeeAddress;
 
     const incentiveId = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
@@ -121,13 +122,6 @@ export class IncentiveService {
       Math.max(positionCreatedAt, startTime);
 
     const rewardEndTime = Math.min(currentTime, endTime);
-
-    console.log('Reward calculation data:', {
-      positionId: positionData.id,
-      rewardStartTime,
-      rewardEndTime,
-      feeCollectionData
-    });
 
     // Calculate total accrued fees
     const totalFeesAccrued = BigInt(feeCollectionData.totalAccruedFeesToken0) +
@@ -277,5 +271,18 @@ export class IncentiveService {
     }
 
     return incentive;
+  }
+
+  async getIncentivesByPoolId(poolAddress: string): Promise<Incentive[]> {
+    return this.incentiveRepository.find({
+      where: { poolAddress },
+      order: { startTime: 'DESC' }
+    });
+  }
+
+  async getAllIncentives(): Promise<Incentive[]> {
+    return this.incentiveRepository.find({
+      order: { startTime: 'DESC' }
+    });
   }
 }

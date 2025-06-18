@@ -247,12 +247,7 @@ export class SubgraphService {
       }
 
       const position = positionData.data?.position;
-      const snapshots = snapshotData.data?.positionSnapshots || [];
 
-      console.log('Combined position data:', position);
-      console.log('Position snapshots:', snapshots);
-
-      // Calculate accrued fees using CURRENT feeGrowthInside values
       let totalAccruedFeesToken0 = '0';
       let totalAccruedFeesToken1 = '0';
 

@@ -23,4 +23,8 @@ export class CreateIncentiveDto {
   @IsString()
   @IsNotEmpty()
   rewardToken: string;
+
+  @IsString()
+  @IsNotEmpty()
+  refundeeAddress: string;
 }

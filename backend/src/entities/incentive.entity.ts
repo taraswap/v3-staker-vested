@@ -19,6 +19,9 @@ export class Incentive {
   @Column({ name: 'pool_address' })
   poolAddress: string;
 
+  @Column({ name: 'refundee_address' })
+  refundeeAddress: string;
+
   @Column('bigint', { name: 'start_time' })
   startTime: string;
 
@@ -28,7 +31,7 @@ export class Incentive {
   @Column('bigint', { name: 'vesting_period' })
   vestingPeriod: string;
 
-  @Column('bigint', { name: 'total_reward_unclaimed' })
+  @Column('decimal', { precision: 78, scale: 0, name: 'total_reward_unclaimed' })
   totalRewardUnclaimed: string;
 
   @CreateDateColumn({ name: 'created_at' })
@@ -37,6 +40,6 @@ export class Incentive {
   @Column('varchar', { length: 42, name: 'reward_token' })
   rewardToken: string;
 
-  @Column('bigint', { name: 'total_reward_claimed' })
+  @Column('decimal', { precision: 78, scale: 0, name: 'total_reward_claimed' })
   totalRewardClaimed: string;
 }

@@ -15,7 +15,7 @@ export class IncentiveController {
     @Body() createIncentiveDto: CreateIncentiveDto,
   ): Promise<Incentive> {
     try {
-      if (!createIncentiveDto.rewardToken || !createIncentiveDto.poolAddress || !createIncentiveDto.startTime || !createIncentiveDto.endTime || !createIncentiveDto.vestingPeriod || !createIncentiveDto.totalRewardUnclaimed) {
+      if (!createIncentiveDto.rewardToken || !createIncentiveDto.poolAddress || !createIncentiveDto.startTime || !createIncentiveDto.endTime || !createIncentiveDto.vestingPeriod || !createIncentiveDto.totalRewardUnclaimed || !createIncentiveDto.refundeeAddress) {
         throw new BadRequestException('Invalid request');
       }
       return await this.incentiveService.createIncentive(createIncentiveDto);
@@ -52,10 +52,34 @@ export class IncentiveController {
     }
   }
 
+  @Get()
+  async getAllIncentives(): Promise<Incentive[]> {
+    try {
+      return this.incentiveService.getAllIncentives();
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   @Get(':incentiveId')
   async getIncentive(
     @Param('incentiveId') incentiveId: string,
   ): Promise<Incentive> {
-    return this.incentiveService.getIncentive(incentiveId);
+    try {
+      return this.incentiveService.getIncentive(incentiveId);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  @Get('pool/:poolAddress')
+  async getIncentivesByPoolId(
+    @Param('poolAddress') poolAddress: string,
+  ): Promise<Incentive[]> {
+    try {
+      return this.incentiveService.getIncentivesByPoolId(poolAddress);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
   }
 }
