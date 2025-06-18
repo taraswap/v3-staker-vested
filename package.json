@@ -1,5 +1,5 @@
 {
-  "name": "@uniswap/v3-staker",
+  "name": "@taraswap/v3-staker-vested",
   "description": "Canonical liquidity mining contract for Uniswap V3",
   "license": "GPL-3.0-or-later",
   "version": "1.0.2",
@@ -28,7 +28,9 @@
     "@openzeppelin/contracts": "3.4.1-solc-0.7-2",
     "@uniswap/v3-core": "1.0.0",
     "@uniswap/v3-periphery": "^1.0.1",
-    "dotenv": "^16.4.5"
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.5",
+    "solc": "^0.7.6"
   },
   "devDependencies": {
     "@nomiclabs/hardhat-ethers": "^2.0.2",
@@ -49,7 +51,7 @@
     "eslint-plugin-unused-imports": "^1.1.1",
     "ethereum-waffle": "^3.0.2",
     "ethers": "^5.0.8",
-    "hardhat": "^2.2.0",
+    "hardhat": "^2.22.17",
     "hardhat-contract-sizer": "^2.0.3",
     "lodash": "^4.17.21",
     "mocha-chai-jest-snapshot": "^1.1.0",
